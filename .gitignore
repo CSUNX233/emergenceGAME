@@ -14,6 +14,7 @@ sysinfo.txt
 
 # Visual Studio / Rider / IDE files
 .vs/
+.vsconfig
 .idea/
 *.csproj
 *.sln
@@ -27,6 +28,7 @@ sysinfo.txt
 *.mdb
 *.opendb
 *.VC.db
+UpgradeLog.htm
 
 # OS files
 .DS_Store
@@ -47,4 +49,3 @@ Desktop.ini
 *.apk
 *.aab
 *.ipa
-
