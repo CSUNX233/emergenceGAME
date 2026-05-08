@@ -1,0 +1,906 @@
+﻿using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+
+public enum PlayerInputMode
+{
+    Elements,
+    Build
+}
+
+public enum ElementPaintTool
+{
+    Fire,
+    Water,
+    Wood
+}
+
+public enum BuildTool
+{
+    Axle,
+    SlimeBlock,
+    WoodPlank,
+    WoodBarrel,
+    IronBlock,
+    StoneBlock,
+    Spike,
+    Flag
+}
+
+public class SimpleBlockPlacer : MonoBehaviour
+{
+    public Camera mainCamera;
+    public GameObject axlePrefab;
+    public GameObject slimeBlockPrefab;
+    public GameObject woodPlankPrefab;
+    public GameObject woodBarrelPrefab;
+    public GameObject ironBlockPrefab;
+    public GameObject stoneBlockPrefab;
+    public GameObject spikePrefab;
+    public GameObject flagPrefab;
+
+    [Header("Snap Size")]
+    public float snapSize = 1f;
+
+    [Header("Placement Layer")]
+    public LayerMask placementBlockLayer;
+
+    [Header("Attachment Layer")]
+    public LayerMask attachmentLayer;
+
+    [Header("Preview Colors")]
+    public Color validColor = new Color(0f, 1f, 0f, 0.35f);
+    public Color invalidColor = new Color(1f, 0f, 0f, 0.35f);
+    public Color attachHintColor = new Color(0.3f, 1f, 0.3f, 0.85f);
+
+    [Header("Attachment Search Radius")]
+    public float attachSearchRadius = 1.2f;
+
+    [Header("Rotation")]
+    public float rotationStepDegrees = 90f;
+
+    [Header("UI")]
+    public bool showModeUI = true;
+    public bool toolbarExpanded = true;
+
+    private GameObject currentPrefabToPlace;
+    private GameObject previewInstance;
+    private SpriteRenderer previewSpriteRenderer;
+    private float currentRotationZ;
+
+    private Canvas toolbarCanvas;
+    private RectTransform toolbarRoot;
+    private GameObject toolbarBackground;
+    private Button toggleToolbarButton;
+    private Button buildModeButton;
+    private Button elementModeButton;
+    private readonly List<Button> modeButtons = new List<Button>();
+    private readonly List<Button> elementToolButtons = new List<Button>();
+    private readonly List<Button> buildToolButtons = new List<Button>();
+    private readonly List<GameObject> collapsibleUiObjects = new List<GameObject>();
+
+    private readonly Color buttonNormalColor = new Color(0.88f, 0.9f, 0.94f, 1f);
+    private readonly Color buttonSelectedColor = new Color(0.24f, 0.63f, 0.96f, 1f);
+    private readonly Color textNormalColor = new Color(0.16f, 0.18f, 0.22f, 1f);
+    private readonly Color textSelectedColor = Color.white;
+    private static readonly string[] FlagButtonNames = { "旗帜", "Flag", "flag", "终点旗" };
+    private bool hasActiveBuildTool = true;
+    private bool hasActiveElementTool = true;
+
+    public PlayerInputMode CurrentMode { get; private set; } = PlayerInputMode.Build;
+    public ElementPaintTool CurrentElementTool { get; private set; } = ElementPaintTool.Fire;
+    public BuildTool CurrentBuildTool { get; private set; } = BuildTool.SlimeBlock;
+
+    public bool IsPlacementModeActive => CurrentMode == PlayerInputMode.Build && currentPrefabToPlace != null;
+    public bool IsElementPaintActive => CurrentMode == PlayerInputMode.Elements && hasActiveElementTool;
+    public bool IsPointerOverToolbar => showModeUI && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+
+    void Start()
+    {
+        if (mainCamera == null)
+            mainCamera = Camera.main;
+
+        CurrentMode = PlayerInputMode.Build;
+        EnsureRuntimeToolbar();
+        SwitchToBuildMode(CurrentBuildTool);
+        RefreshToolbarButtons();
+    }
+
+    void Update()
+    {
+        if (mainCamera == null)
+        {
+            Debug.LogError("SimpleBlockPlacer: mainCamera is not assigned.");
+            return;
+        }
+
+        HandleHotkeys();
+        HandleRotationInput();
+        UpdatePreview();
+        HandlePlacement();
+    }
+
+    void HandleHotkeys()
+    {
+        if (Input.GetKeyDown(KeyCode.F1))
+            SwitchToElementMode(CurrentElementTool);
+
+        if (Input.GetKeyDown(KeyCode.F2))
+            SwitchToBuildMode(CurrentBuildTool);
+
+        if (Input.GetKeyDown(KeyCode.Escape))
+            SwitchToElementMode(CurrentElementTool);
+
+        if (Input.GetKeyDown(KeyCode.Tab))
+            SetToolbarExpanded(!toolbarExpanded);
+    }
+
+    void HandleRotationInput()
+    {
+        if (CurrentMode != PlayerInputMode.Build || previewInstance == null)
+            return;
+
+        float scroll = Input.mouseScrollDelta.y;
+        if (Mathf.Abs(scroll) < 0.01f)
+            return;
+
+        float delta = scroll > 0f ? rotationStepDegrees : -rotationStepDegrees;
+        currentRotationZ = Mathf.Repeat(currentRotationZ + delta, 360f);
+        previewInstance.transform.rotation = Quaternion.Euler(0f, 0f, currentRotationZ);
+    }
+
+    void UpdatePreview()
+    {
+        if (CurrentMode != PlayerInputMode.Build || currentPrefabToPlace == null || previewInstance == null)
+            return;
+
+        if (IsPointerOverToolbar)
+            return;
+
+        Vector3 mousePos = mainCamera.ScreenToWorldPoint(Input.mousePosition);
+        mousePos.z = 0f;
+
+        Vector3 desiredPos = GetSnappedPosition(mousePos);
+        bool canPlace = TryGetPlacementPosition(currentPrefabToPlace, desiredPos, currentRotationZ, out Vector3 previewPos, out float previewRotationZ, out bool willAttach);
+        previewInstance.transform.position = previewPos;
+        previewInstance.transform.rotation = Quaternion.Euler(0f, 0f, previewRotationZ);
+
+        if (previewSpriteRenderer != null)
+        {
+            previewSpriteRenderer.color = !canPlace
+                ? invalidColor
+                : willAttach ? attachHintColor : validColor;
+            previewSpriteRenderer.sortingOrder = 100;
+        }
+    }
+
+    void HandlePlacement()
+    {
+        if (CurrentMode != PlayerInputMode.Build || currentPrefabToPlace == null || previewInstance == null)
+            return;
+
+        if (IsPointerOverToolbar || !Input.GetMouseButtonDown(0))
+            return;
+
+        Vector3 mousePos = mainCamera.ScreenToWorldPoint(Input.mousePosition);
+        mousePos.z = 0f;
+        Vector3 desiredPos = GetSnappedPosition(mousePos);
+
+        if (!TryGetPlacementPosition(currentPrefabToPlace, desiredPos, currentRotationZ, out Vector3 placePos, out float placeRotationZ, out _))
+            return;
+
+        GameObject placed = Instantiate(currentPrefabToPlace, placePos, Quaternion.Euler(0f, 0f, placeRotationZ));
+        ConfigurePlacedObject(placed);
+    }
+
+    void ConfigurePlacedObject(GameObject placed)
+    {
+        StickyBlock sticky = placed.GetComponent<StickyBlock>();
+        if (sticky != null)
+        {
+            sticky.attachSearchRadius = attachSearchRadius;
+            sticky.attachmentLayer = attachmentLayer;
+            sticky.TryAutoAttach();
+        }
+
+        WoodPlankBlock plank = placed.GetComponent<WoodPlankBlock>();
+        if (plank != null)
+        {
+            plank.attachSearchRadius = attachSearchRadius;
+            plank.attachmentLayer = attachmentLayer;
+            plank.TryAutoAttach();
+        }
+
+        StickyAttachBlock attachedBlock = placed.GetComponent<StickyAttachBlock>();
+        if (attachedBlock != null)
+        {
+            attachedBlock.attachSearchRadius = attachSearchRadius;
+            attachedBlock.attachmentLayer = attachmentLayer;
+            attachedBlock.TryAutoAttach();
+        }
+
+        SpikeTrap spikeTrap = placed.GetComponent<SpikeTrap>();
+        if (spikeTrap != null)
+        {
+            spikeTrap.attachSearchRadius = attachSearchRadius;
+            spikeTrap.attachmentLayer = attachmentLayer;
+            spikeTrap.TryAutoAttach();
+        }
+
+        FlagGoal flagGoal = placed.GetComponent<FlagGoal>();
+        if (flagGoal != null)
+        {
+            flagGoal.attachSearchRadius = attachSearchRadius;
+            flagGoal.attachmentLayer = attachmentLayer;
+            flagGoal.TryAutoAttach();
+        }
+    }
+
+    public void SwitchToElementMode(ElementPaintTool tool)
+    {
+        CurrentElementTool = tool;
+        CurrentMode = PlayerInputMode.Elements;
+        hasActiveElementTool = true;
+        DestroyPreview();
+        RefreshToolbarButtons();
+    }
+
+    public void SwitchToBuildMode(BuildTool tool)
+    {
+        CurrentBuildTool = tool;
+        CurrentMode = PlayerInputMode.Build;
+        hasActiveBuildTool = true;
+        CreatePreviewForTool(tool);
+        RefreshToolbarButtons();
+    }
+
+    public void ToggleElementTool(ElementPaintTool tool)
+    {
+        if (CurrentMode == PlayerInputMode.Elements && hasActiveElementTool && CurrentElementTool == tool)
+        {
+            hasActiveElementTool = false;
+            DestroyPreview();
+            RefreshToolbarButtons();
+            return;
+        }
+
+        SwitchToElementMode(tool);
+    }
+
+    public void ToggleBuildTool(BuildTool tool)
+    {
+        if (CurrentMode == PlayerInputMode.Build && hasActiveBuildTool && CurrentBuildTool == tool)
+        {
+            hasActiveBuildTool = false;
+            DestroyPreview();
+            currentPrefabToPlace = null;
+            RefreshToolbarButtons();
+            return;
+        }
+
+        SwitchToBuildMode(tool);
+    }
+
+    public MaterialType GetSelectedMaterialType()
+    {
+        switch (CurrentElementTool)
+        {
+            case ElementPaintTool.Water:
+                return MaterialType.Water;
+            case ElementPaintTool.Wood:
+                return MaterialType.Wood;
+            default:
+                return MaterialType.Fire;
+        }
+    }
+
+    void CreatePreviewForTool(BuildTool tool)
+    {
+        GameObject prefab = GetPrefabForTool(tool);
+        if (prefab == null)
+        {
+            DestroyPreview();
+            return;
+        }
+
+        DestroyPreview();
+        currentPrefabToPlace = prefab;
+        currentRotationZ = 0f;
+
+        previewInstance = Instantiate(prefab);
+        previewInstance.name = prefab.name + "_Preview";
+        previewInstance.transform.rotation = Quaternion.Euler(0f, 0f, currentRotationZ);
+        DisablePreviewPhysicsAndScripts(previewInstance);
+        previewSpriteRenderer = previewInstance.GetComponent<SpriteRenderer>();
+    }
+
+    void DestroyPreview()
+    {
+        if (previewInstance != null)
+            Destroy(previewInstance);
+
+        previewInstance = null;
+        previewSpriteRenderer = null;
+
+        if (CurrentMode != PlayerInputMode.Build)
+            currentPrefabToPlace = null;
+    }
+
+    GameObject GetPrefabForTool(BuildTool tool)
+    {
+        switch (tool)
+        {
+            case BuildTool.Axle: return axlePrefab;
+            case BuildTool.SlimeBlock: return slimeBlockPrefab;
+            case BuildTool.WoodPlank: return woodPlankPrefab;
+            case BuildTool.WoodBarrel: return woodBarrelPrefab;
+            case BuildTool.IronBlock: return ironBlockPrefab;
+            case BuildTool.StoneBlock: return stoneBlockPrefab;
+            case BuildTool.Spike: return spikePrefab;
+            case BuildTool.Flag: return flagPrefab;
+            default: return null;
+        }
+    }
+
+    Vector3 GetSnappedPosition(Vector3 worldPos)
+    {
+        worldPos.x = Mathf.Round(worldPos.x / snapSize) * snapSize;
+        worldPos.y = Mathf.Round(worldPos.y / snapSize) * snapSize;
+        worldPos.z = 0f;
+        return worldPos;
+    }
+
+    bool TryGetPlacementPosition(GameObject prefab, Vector3 desiredPosition, float rotationZ, out Vector3 finalPosition, out float finalRotationZ, out bool willAttach)
+    {
+        finalPosition = desiredPosition;
+        finalRotationZ = rotationZ;
+        willAttach = false;
+
+        GameObject attachmentSource = previewInstance != null ? previewInstance : prefab;
+
+        if (TryHandleStickyPlacement(attachmentSource, prefab, desiredPosition, rotationZ, out finalPosition, out Collider2D stickyTarget, out bool stickyAttach))
+        {
+            willAttach = stickyAttach;
+            return stickyAttach ? CanPlaceAt(prefab, finalPosition, rotationZ, stickyTarget) : CanPlaceAt(prefab, desiredPosition, rotationZ, null);
+        }
+
+        SpikeTrap spikeTrap = attachmentSource.GetComponent<SpikeTrap>();
+        if (spikeTrap != null)
+        {
+            spikeTrap.attachSearchRadius = attachSearchRadius;
+            spikeTrap.attachmentLayer = attachmentLayer;
+
+            if (!TryGetValidAttachPlacement(spikeTrap, prefab, desiredPosition, out finalPosition, out finalRotationZ, out Collider2D spikeTarget))
+                return false;
+
+            willAttach = true;
+            return CanPlaceAt(prefab, finalPosition, finalRotationZ, spikeTarget);
+        }
+
+        FlagGoal flagGoal = attachmentSource.GetComponent<FlagGoal>();
+        if (flagGoal != null)
+        {
+            flagGoal.attachSearchRadius = attachSearchRadius;
+            flagGoal.attachmentLayer = attachmentLayer;
+
+            if (!TryGetValidAttachPlacement(flagGoal, prefab, desiredPosition, out finalPosition, out finalRotationZ, out Collider2D flagTarget))
+                return false;
+
+            willAttach = true;
+            return CanPlaceAt(prefab, finalPosition, finalRotationZ, flagTarget);
+        }
+
+        return CanPlaceAt(prefab, desiredPosition, rotationZ, null);
+    }
+
+    bool TryHandleStickyPlacement(GameObject attachmentSource, GameObject prefab, Vector3 desiredPosition, float rotationZ, out Vector3 finalPosition, out Collider2D target, out bool willAttach)
+    {
+        finalPosition = desiredPosition;
+        target = null;
+        willAttach = false;
+
+        StickyBlock sticky = attachmentSource.GetComponent<StickyBlock>();
+        if (sticky != null)
+        {
+            sticky.attachSearchRadius = attachSearchRadius;
+            sticky.attachmentLayer = attachmentLayer;
+
+            if (!TryGetValidAttachPlacement(sticky, prefab, desiredPosition, rotationZ, out finalPosition, out target))
+                return false;
+
+            willAttach = true;
+            return true;
+        }
+
+        WoodPlankBlock plank = attachmentSource.GetComponent<WoodPlankBlock>();
+        if (plank != null)
+        {
+            plank.attachSearchRadius = attachSearchRadius;
+            plank.attachmentLayer = attachmentLayer;
+
+            if (!TryGetValidAttachPlacement(plank, prefab, desiredPosition, rotationZ, out finalPosition, out target))
+                return false;
+
+            willAttach = true;
+            return true;
+        }
+
+        StickyAttachBlock attachBlock = attachmentSource.GetComponent<StickyAttachBlock>();
+        if (attachBlock != null)
+        {
+            attachBlock.attachSearchRadius = attachSearchRadius;
+            attachBlock.attachmentLayer = attachmentLayer;
+
+            if (!TryGetValidAttachPlacement(attachBlock, prefab, desiredPosition, rotationZ, out finalPosition, out target))
+                return false;
+
+            willAttach = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool TryGetValidAttachPlacement(StickyBlock sticky, GameObject prefab, Vector3 desiredPosition, float rotationZ, out Vector3 finalPosition, out Collider2D allowedAttachmentTarget)
+    {
+        finalPosition = desiredPosition;
+        allowedAttachmentTarget = null;
+        Collider2D[] targets = Physics2D.OverlapCircleAll(desiredPosition, attachSearchRadius, attachmentLayer);
+        bool found = false;
+        float bestDistance = float.MaxValue;
+
+        for (int i = 0; i < targets.Length; i++)
+        {
+            Collider2D target = targets[i];
+            if (target == null)
+                continue;
+            if (target.GetComponent<RotatingAxle>() == null && target.GetComponent<StickyBlock>() == null)
+                continue;
+
+            List<Vector3> candidatePositions = sticky.GetCandidatePositionsForTarget(desiredPosition, target);
+            for (int j = 0; j < candidatePositions.Count; j++)
+            {
+                Vector3 candidate = candidatePositions[j];
+                if (!CanPlaceAt(prefab, candidate, rotationZ, target))
+                    continue;
+
+                float distance = Vector2.Distance(desiredPosition, candidate);
+                if (!found || distance < bestDistance)
+                {
+                    found = true;
+                    bestDistance = distance;
+                    finalPosition = candidate;
+                    allowedAttachmentTarget = target;
+                }
+            }
+        }
+
+        return found;
+    }
+
+    bool TryGetValidAttachPlacement(WoodPlankBlock plank, GameObject prefab, Vector3 desiredPosition, float rotationZ, out Vector3 finalPosition, out Collider2D allowedAttachmentTarget)
+    {
+        finalPosition = desiredPosition;
+        allowedAttachmentTarget = null;
+        Collider2D[] targets = Physics2D.OverlapCircleAll(desiredPosition, attachSearchRadius, attachmentLayer);
+        bool found = false;
+        float bestDistance = float.MaxValue;
+
+        for (int i = 0; i < targets.Length; i++)
+        {
+            Collider2D target = targets[i];
+            if (target == null || target.GetComponent<StickyBlock>() == null)
+                continue;
+
+            List<Vector3> candidatePositions = plank.GetCandidatePositionsForTarget(desiredPosition, target);
+            for (int j = 0; j < candidatePositions.Count; j++)
+            {
+                Vector3 candidate = candidatePositions[j];
+                if (!CanPlaceAt(prefab, candidate, rotationZ, target))
+                    continue;
+
+                float distance = Vector2.Distance(desiredPosition, candidate);
+                if (!found || distance < bestDistance)
+                {
+                    found = true;
+                    bestDistance = distance;
+                    finalPosition = candidate;
+                    allowedAttachmentTarget = target;
+                }
+            }
+        }
+
+        return found;
+    }
+
+    bool TryGetValidAttachPlacement(StickyAttachBlock attachBlock, GameObject prefab, Vector3 desiredPosition, float rotationZ, out Vector3 finalPosition, out Collider2D allowedAttachmentTarget)
+    {
+        finalPosition = desiredPosition;
+        allowedAttachmentTarget = null;
+        Collider2D[] targets = Physics2D.OverlapCircleAll(desiredPosition, attachSearchRadius, attachmentLayer);
+        bool found = false;
+        float bestDistance = float.MaxValue;
+
+        for (int i = 0; i < targets.Length; i++)
+        {
+            Collider2D target = targets[i];
+            if (target == null || target.GetComponent<StickyBlock>() == null)
+                continue;
+
+            List<Vector3> candidatePositions = attachBlock.GetCandidatePositionsForTarget(desiredPosition, target);
+            for (int j = 0; j < candidatePositions.Count; j++)
+            {
+                Vector3 candidate = candidatePositions[j];
+                if (!CanPlaceAt(prefab, candidate, rotationZ, target))
+                    continue;
+
+                float distance = Vector2.Distance(desiredPosition, candidate);
+                if (!found || distance < bestDistance)
+                {
+                    found = true;
+                    bestDistance = distance;
+                    finalPosition = candidate;
+                    allowedAttachmentTarget = target;
+                }
+            }
+        }
+
+        return found;
+    }
+
+    bool TryGetValidAttachPlacement(SpikeTrap spikeTrap, GameObject prefab, Vector3 desiredPosition, out Vector3 finalPosition, out float finalRotationZ, out Collider2D allowedAttachmentTarget)
+    {
+        finalPosition = desiredPosition;
+        finalRotationZ = 0f;
+        allowedAttachmentTarget = null;
+        Collider2D[] targets = Physics2D.OverlapCircleAll(desiredPosition, attachSearchRadius, attachmentLayer);
+        bool found = false;
+        float bestDistance = float.MaxValue;
+
+        for (int i = 0; i < targets.Length; i++)
+        {
+            Collider2D target = targets[i];
+            if (!spikeTrap.CanAttachToCollider(target))
+                continue;
+
+            if (!spikeTrap.TryGetNearestFacePose(desiredPosition, target, out SpikeTrap.AttachmentPose candidatePose))
+                continue;
+
+            if (!spikeTrap.IsFaceAvailable(target, candidatePose))
+                continue;
+
+            Vector3 candidate = candidatePose.position;
+            float candidateRotationZ = candidatePose.rotationZ;
+            if (!CanPlaceAt(prefab, candidate, candidateRotationZ, target))
+                continue;
+
+            float distance = Vector2.Distance(desiredPosition, candidate);
+            if (!found || distance < bestDistance)
+            {
+                found = true;
+                bestDistance = distance;
+                finalPosition = candidate;
+                finalRotationZ = candidateRotationZ;
+                allowedAttachmentTarget = target;
+            }
+        }
+
+        return found;
+    }
+
+    bool TryGetValidAttachPlacement(FlagGoal flagGoal, GameObject prefab, Vector3 desiredPosition, out Vector3 finalPosition, out float finalRotationZ, out Collider2D allowedAttachmentTarget)
+    {
+        finalPosition = desiredPosition;
+        finalRotationZ = 0f;
+        allowedAttachmentTarget = null;
+        Collider2D[] targets = Physics2D.OverlapCircleAll(desiredPosition, attachSearchRadius, attachmentLayer);
+        bool found = false;
+        float bestDistance = float.MaxValue;
+
+        for (int i = 0; i < targets.Length; i++)
+        {
+            Collider2D target = targets[i];
+            if (!flagGoal.CanAttachToCollider(target))
+                continue;
+
+            if (!flagGoal.TryGetNearestFacePose(desiredPosition, target, out SpikeTrap.AttachmentPose candidatePose))
+                continue;
+
+            if (!flagGoal.IsFaceAvailable(target, candidatePose))
+                continue;
+
+            Vector3 candidate = candidatePose.position;
+            float candidateRotationZ = candidatePose.rotationZ;
+            if (!CanPlaceAt(prefab, candidate, candidateRotationZ, target))
+                continue;
+
+            float distance = Vector2.Distance(desiredPosition, candidate);
+            if (!found || distance < bestDistance)
+            {
+                found = true;
+                bestDistance = distance;
+                finalPosition = candidate;
+                finalRotationZ = candidateRotationZ;
+                allowedAttachmentTarget = target;
+            }
+        }
+
+        return found;
+    }
+
+    bool CanPlaceAt(GameObject prefab, Vector3 position, float rotationZ, Collider2D allowedAttachmentTarget)
+    {
+        Vector2 checkSize = GetPrefabCheckSize(prefab);
+        TerrainTilemapSurface allowedTerrain = allowedAttachmentTarget != null
+            ? allowedAttachmentTarget.GetComponentInParent<TerrainTilemapSurface>()
+            : null;
+
+        Collider2D[] hits = Physics2D.OverlapBoxAll(position, checkSize, rotationZ, placementBlockLayer);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D hit = hits[i];
+            if (hit == null)
+                continue;
+            if (allowedAttachmentTarget != null && hit == allowedAttachmentTarget)
+                continue;
+            if (allowedTerrain != null && hit.GetComponentInParent<TerrainTilemapSurface>() == allowedTerrain)
+                continue;
+            return false;
+        }
+        return true;
+    }
+
+    Vector2 GetPrefabCheckSize(GameObject prefab)
+    {
+        return PlacementSizeUtility.GetPlacementCheckSize(prefab);
+    }
+
+    void DisablePreviewPhysicsAndScripts(GameObject preview)
+    {
+        foreach (Collider2D col in preview.GetComponentsInChildren<Collider2D>())
+            col.enabled = false;
+        foreach (Rigidbody2D rb in preview.GetComponentsInChildren<Rigidbody2D>())
+            rb.simulated = false;
+
+        DisableIfExists<RotatingAxle>(preview);
+        DisableIfExists<StickyBlock>(preview);
+        DisableIfExists<WoodPlankBlock>(preview);
+        DisableIfExists<StickyAttachBlock>(preview);
+        DisableIfExists<SpikeTrap>(preview);
+        DisableIfExists<FlagGoal>(preview);
+        DisableIfExists<GridObjectBinder>(preview);
+        DisableIfExists<BurnableObject>(preview);
+        DisableIfExists<FloatOnWater>(preview);
+        DisableIfExists<WaterBarrel>(preview);
+        DisableIfExists<HeatConductor>(preview);
+        DisableIfExists<PhysicalWeight>(preview);
+    }
+
+    void DisableIfExists<T>(GameObject preview) where T : Behaviour
+    {
+        T behaviour = preview.GetComponent<T>();
+        if (behaviour != null)
+            behaviour.enabled = false;
+    }
+
+    void EnsureRuntimeToolbar()
+    {
+        EnsureEventSystem();
+        toolbarCanvas = FindObjectOfType<Canvas>();
+        toolbarRoot = FindRectTransformByName("toolbar");
+        toolbarBackground = FindGameObjectByName("background");
+
+        buildModeButton = FindButtonByName("建造模式");
+        elementModeButton = FindButtonByName("元素模式");
+        toggleToolbarButton = FindButtonByName("隐藏");
+
+        modeButtons.Clear();
+        if (buildModeButton != null) modeButtons.Add(buildModeButton);
+        if (elementModeButton != null) modeButtons.Add(elementModeButton);
+
+        elementToolButtons.Clear();
+        AddButtonIfFound(elementToolButtons, "火");
+        AddButtonIfFound(elementToolButtons, "水");
+        AddButtonIfFound(elementToolButtons, "木");
+
+        buildToolButtons.Clear();
+        AddButtonIfFound(buildToolButtons, "转轴");
+        AddButtonIfFound(buildToolButtons, "粘液块");
+        AddButtonIfFound(buildToolButtons, "木板");
+        AddButtonIfFound(buildToolButtons, "木桶");
+        AddButtonIfFound(buildToolButtons, "铁块");
+        AddButtonIfFound(buildToolButtons, "石头");
+        AddButtonIfFound(buildToolButtons, "尖刺");
+        AddButtonIfFound(buildToolButtons, FlagButtonNames);
+
+        collapsibleUiObjects.Clear();
+        AddUiObjectIfFound(toolbarBackground);
+        AddUiObjectIfFound(buildModeButton != null ? buildModeButton.gameObject : null);
+        AddUiObjectIfFound(elementModeButton != null ? elementModeButton.gameObject : null);
+        for (int i = 0; i < elementToolButtons.Count; i++)
+            AddUiObjectIfFound(elementToolButtons[i].gameObject);
+        for (int i = 0; i < buildToolButtons.Count; i++)
+            AddUiObjectIfFound(buildToolButtons[i].gameObject);
+
+        BindButton(buildModeButton, () => SwitchToBuildMode(CurrentBuildTool));
+        BindButton(elementModeButton, () => SwitchToElementMode(CurrentElementTool));
+        BindButton(toggleToolbarButton, () => SetToolbarExpanded(!toolbarExpanded));
+
+        BindButton(FindButtonByName("火"), () => ToggleElementTool(ElementPaintTool.Fire));
+        BindButton(FindButtonByName("水"), () => ToggleElementTool(ElementPaintTool.Water));
+        BindButton(FindButtonByName("木"), () => ToggleElementTool(ElementPaintTool.Wood));
+
+        BindButton(FindButtonByName("转轴"), () => ToggleBuildTool(BuildTool.Axle));
+        BindButton(FindButtonByName("粘液块"), () => ToggleBuildTool(BuildTool.SlimeBlock));
+        BindButton(FindButtonByName("木板"), () => ToggleBuildTool(BuildTool.WoodPlank));
+        BindButton(FindButtonByName("木桶"), () => ToggleBuildTool(BuildTool.WoodBarrel));
+        BindButton(FindButtonByName("铁块"), () => ToggleBuildTool(BuildTool.IronBlock));
+        BindButton(FindButtonByName("石头"), () => ToggleBuildTool(BuildTool.StoneBlock));
+        BindButton(FindButtonByName("尖刺"), () => ToggleBuildTool(BuildTool.Spike));
+        BindButton(FindButtonByName(FlagButtonNames), () => ToggleBuildTool(BuildTool.Flag));
+
+        SetToolbarExpanded(toolbarExpanded);
+        RefreshToolbarButtons();
+    }
+
+    void EnsureEventSystem()
+    {
+        if (EventSystem.current != null)
+            return;
+
+        new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+    }
+
+    void SetToolbarExpanded(bool expanded)
+    {
+        toolbarExpanded = expanded;
+
+        for (int i = 0; i < collapsibleUiObjects.Count; i++)
+        {
+            if (collapsibleUiObjects[i] != null)
+                collapsibleUiObjects[i].SetActive(expanded);
+        }
+
+        if (toggleToolbarButton != null)
+            SetButtonText(toggleToolbarButton, expanded ? "隐藏" : "展开");
+
+        RefreshToolbarButtons();
+    }
+
+    void RefreshToolbarButtons()
+    {
+        UpdateModeButtonVisuals();
+
+        bool showElements = CurrentMode == PlayerInputMode.Elements;
+        for (int i = 0; i < elementToolButtons.Count; i++)
+        {
+            if (elementToolButtons[i] != null)
+                elementToolButtons[i].gameObject.SetActive(toolbarExpanded && showElements);
+        }
+
+        for (int i = 0; i < buildToolButtons.Count; i++)
+        {
+            if (buildToolButtons[i] != null)
+                buildToolButtons[i].gameObject.SetActive(toolbarExpanded && !showElements);
+        }
+
+        ApplyButtonVisual(FindButtonByName("火"), hasActiveElementTool && CurrentElementTool == ElementPaintTool.Fire);
+        ApplyButtonVisual(FindButtonByName("水"), hasActiveElementTool && CurrentElementTool == ElementPaintTool.Water);
+        ApplyButtonVisual(FindButtonByName("木"), hasActiveElementTool && CurrentElementTool == ElementPaintTool.Wood);
+
+        ApplyButtonVisual(FindButtonByName("转轴"), hasActiveBuildTool && CurrentBuildTool == BuildTool.Axle);
+        ApplyButtonVisual(FindButtonByName("粘液块"), hasActiveBuildTool && CurrentBuildTool == BuildTool.SlimeBlock);
+        ApplyButtonVisual(FindButtonByName("木板"), hasActiveBuildTool && CurrentBuildTool == BuildTool.WoodPlank);
+        ApplyButtonVisual(FindButtonByName("木桶"), hasActiveBuildTool && CurrentBuildTool == BuildTool.WoodBarrel);
+        ApplyButtonVisual(FindButtonByName("铁块"), hasActiveBuildTool && CurrentBuildTool == BuildTool.IronBlock);
+        ApplyButtonVisual(FindButtonByName("石头"), hasActiveBuildTool && CurrentBuildTool == BuildTool.StoneBlock);
+        ApplyButtonVisual(FindButtonByName("尖刺"), hasActiveBuildTool && CurrentBuildTool == BuildTool.Spike);
+        ApplyButtonVisual(FindButtonByName(FlagButtonNames), hasActiveBuildTool && CurrentBuildTool == BuildTool.Flag);
+    }
+
+    void UpdateModeButtonVisuals()
+    {
+        if (modeButtons.Count >= 2)
+        {
+            ApplyButtonVisual(modeButtons[0], CurrentMode == PlayerInputMode.Build);
+            ApplyButtonVisual(modeButtons[1], CurrentMode == PlayerInputMode.Elements);
+        }
+    }
+
+    RectTransform FindRectTransformByName(string objectName)
+    {
+        GameObject obj = FindGameObjectByName(objectName);
+        return obj != null ? obj.GetComponent<RectTransform>() : null;
+    }
+
+    Button FindButtonByName(string objectName)
+    {
+        GameObject obj = FindGameObjectByName(objectName);
+        return obj != null ? obj.GetComponent<Button>() : null;
+    }
+
+    Button FindButtonByName(params string[] objectNames)
+    {
+        for (int i = 0; i < objectNames.Length; i++)
+        {
+            Button button = FindButtonByName(objectNames[i]);
+            if (button != null)
+                return button;
+        }
+
+        return null;
+    }
+
+    GameObject FindGameObjectByName(string objectName)
+    {
+        Transform[] allTransforms = Resources.FindObjectsOfTypeAll<Transform>();
+        for (int i = 0; i < allTransforms.Length; i++)
+        {
+            Transform t = allTransforms[i];
+            if (t == null || t.hideFlags != HideFlags.None)
+                continue;
+            if (!t.gameObject.scene.IsValid())
+                continue;
+            if (t.name == objectName)
+                return t.gameObject;
+        }
+
+        return null;
+    }
+
+    void BindButton(Button button, UnityEngine.Events.UnityAction action)
+    {
+        if (button == null)
+            return;
+
+        button.onClick.RemoveAllListeners();
+        button.onClick.AddListener(action);
+    }
+
+    void AddButtonIfFound(List<Button> list, string objectName)
+    {
+        Button button = FindButtonByName(objectName);
+        if (button != null)
+            list.Add(button);
+    }
+
+    void AddButtonIfFound(List<Button> list, params string[] objectNames)
+    {
+        Button button = FindButtonByName(objectNames);
+        if (button != null)
+            list.Add(button);
+    }
+
+    void AddUiObjectIfFound(GameObject obj)
+    {
+        if (obj != null && !collapsibleUiObjects.Contains(obj))
+            collapsibleUiObjects.Add(obj);
+    }
+
+    void ApplyButtonVisual(Button button, bool selected)
+    {
+        if (button == null)
+            return;
+
+        Image image = button.GetComponent<Image>();
+        if (image != null)
+            image.color = selected ? buttonSelectedColor : buttonNormalColor;
+
+
+        Text label = button.GetComponentInChildren<Text>(true);
+        if (label != null)
+            label.color = selected ? textSelectedColor : textNormalColor;
+    }
+
+    void SetButtonText(Button button, string text)
+    {
+        if (button == null)
+            return;
+
+
+        Text label = button.GetComponentInChildren<Text>(true);
+        if (label != null)
+            label.text = text;
+    }
+}
