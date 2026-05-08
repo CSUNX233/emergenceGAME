@@ -25,7 +25,8 @@ public enum BuildTool
     IronBlock,
     StoneBlock,
     Spike,
-    Flag
+    Flag,
+    BalanceScale
 }
 
 public class SimpleBlockPlacer : MonoBehaviour
@@ -39,6 +40,7 @@ public class SimpleBlockPlacer : MonoBehaviour
     public GameObject stoneBlockPrefab;
     public GameObject spikePrefab;
     public GameObject flagPrefab;
+    public GameObject balanceScalePrefab;
 
     [Header("Snap Size")]
     public float snapSize = 1f;
@@ -65,8 +67,9 @@ public class SimpleBlockPlacer : MonoBehaviour
     public bool toolbarExpanded = true;
 
     private GameObject currentPrefabToPlace;
+    private GameObject runtimeBalanceScalePrefab;
     private GameObject previewInstance;
-    private SpriteRenderer previewSpriteRenderer;
+    private SpriteRenderer[] previewSpriteRenderers;
     private float currentRotationZ;
 
     private Canvas toolbarCanvas;
@@ -85,8 +88,9 @@ public class SimpleBlockPlacer : MonoBehaviour
     private readonly Color textNormalColor = new Color(0.16f, 0.18f, 0.22f, 1f);
     private readonly Color textSelectedColor = Color.white;
     private static readonly string[] FlagButtonNames = { "旗帜", "Flag", "flag", "终点旗" };
-    private bool hasActiveBuildTool = true;
-    private bool hasActiveElementTool = true;
+    private static readonly string[] BalanceScaleButtonNames = { "天平", "Balance", "BalanceScale", "balance" };
+    private bool hasActiveBuildTool = false;
+    private bool hasActiveElementTool = false;
 
     public PlayerInputMode CurrentMode { get; private set; } = PlayerInputMode.Build;
     public ElementPaintTool CurrentElementTool { get; private set; } = ElementPaintTool.Fire;
@@ -102,8 +106,10 @@ public class SimpleBlockPlacer : MonoBehaviour
             mainCamera = Camera.main;
 
         CurrentMode = PlayerInputMode.Build;
+        hasActiveBuildTool = false;
+        hasActiveElementTool = false;
+        currentPrefabToPlace = null;
         EnsureRuntimeToolbar();
-        SwitchToBuildMode(CurrentBuildTool);
         RefreshToolbarButtons();
     }
 
@@ -124,13 +130,13 @@ public class SimpleBlockPlacer : MonoBehaviour
     void HandleHotkeys()
     {
         if (Input.GetKeyDown(KeyCode.F1))
-            SwitchToElementMode(CurrentElementTool);
+            SwitchToElementMode();
 
         if (Input.GetKeyDown(KeyCode.F2))
-            SwitchToBuildMode(CurrentBuildTool);
+            SwitchToBuildMode();
 
         if (Input.GetKeyDown(KeyCode.Escape))
-            SwitchToElementMode(CurrentElementTool);
+            SwitchToElementMode();
 
         if (Input.GetKeyDown(KeyCode.Tab))
             SetToolbarExpanded(!toolbarExpanded);
@@ -166,12 +172,20 @@ public class SimpleBlockPlacer : MonoBehaviour
         previewInstance.transform.position = previewPos;
         previewInstance.transform.rotation = Quaternion.Euler(0f, 0f, previewRotationZ);
 
-        if (previewSpriteRenderer != null)
+        if (previewSpriteRenderers != null)
         {
-            previewSpriteRenderer.color = !canPlace
+            Color previewColor = !canPlace
                 ? invalidColor
                 : willAttach ? attachHintColor : validColor;
-            previewSpriteRenderer.sortingOrder = 100;
+
+            for (int i = 0; i < previewSpriteRenderers.Length; i++)
+            {
+                if (previewSpriteRenderers[i] == null)
+                    continue;
+
+                previewSpriteRenderers[i].color = previewColor;
+                previewSpriteRenderers[i].sortingOrder = 100 + i;
+            }
         }
     }
 
@@ -191,6 +205,7 @@ public class SimpleBlockPlacer : MonoBehaviour
             return;
 
         GameObject placed = Instantiate(currentPrefabToPlace, placePos, Quaternion.Euler(0f, 0f, placeRotationZ));
+        placed.SetActive(true);
         ConfigurePlacedObject(placed);
     }
 
@@ -246,12 +261,30 @@ public class SimpleBlockPlacer : MonoBehaviour
         RefreshToolbarButtons();
     }
 
+    public void SwitchToElementMode()
+    {
+        CurrentMode = PlayerInputMode.Elements;
+        hasActiveElementTool = false;
+        DestroyPreview();
+        currentPrefabToPlace = null;
+        RefreshToolbarButtons();
+    }
+
     public void SwitchToBuildMode(BuildTool tool)
     {
         CurrentBuildTool = tool;
         CurrentMode = PlayerInputMode.Build;
         hasActiveBuildTool = true;
         CreatePreviewForTool(tool);
+        RefreshToolbarButtons();
+    }
+
+    public void SwitchToBuildMode()
+    {
+        CurrentMode = PlayerInputMode.Build;
+        hasActiveBuildTool = false;
+        DestroyPreview();
+        currentPrefabToPlace = null;
         RefreshToolbarButtons();
     }
 
@@ -309,10 +342,11 @@ public class SimpleBlockPlacer : MonoBehaviour
         currentRotationZ = 0f;
 
         previewInstance = Instantiate(prefab);
+        previewInstance.SetActive(true);
         previewInstance.name = prefab.name + "_Preview";
         previewInstance.transform.rotation = Quaternion.Euler(0f, 0f, currentRotationZ);
         DisablePreviewPhysicsAndScripts(previewInstance);
-        previewSpriteRenderer = previewInstance.GetComponent<SpriteRenderer>();
+        previewSpriteRenderers = previewInstance.GetComponentsInChildren<SpriteRenderer>();
     }
 
     void DestroyPreview()
@@ -321,7 +355,7 @@ public class SimpleBlockPlacer : MonoBehaviour
             Destroy(previewInstance);
 
         previewInstance = null;
-        previewSpriteRenderer = null;
+        previewSpriteRenderers = null;
 
         if (CurrentMode != PlayerInputMode.Build)
             currentPrefabToPlace = null;
@@ -339,8 +373,17 @@ public class SimpleBlockPlacer : MonoBehaviour
             case BuildTool.StoneBlock: return stoneBlockPrefab;
             case BuildTool.Spike: return spikePrefab;
             case BuildTool.Flag: return flagPrefab;
+            case BuildTool.BalanceScale: return balanceScalePrefab != null ? balanceScalePrefab : GetRuntimeBalanceScalePrefab();
             default: return null;
         }
+    }
+
+    GameObject GetRuntimeBalanceScalePrefab()
+    {
+        if (runtimeBalanceScalePrefab == null)
+            runtimeBalanceScalePrefab = BalanceScale.CreateRuntimePrefab();
+
+        return runtimeBalanceScalePrefab;
     }
 
     Vector3 GetSnappedPosition(Vector3 worldPos)
@@ -675,6 +718,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         DisableIfExists<WaterBarrel>(preview);
         DisableIfExists<HeatConductor>(preview);
         DisableIfExists<PhysicalWeight>(preview);
+        DisableIfExists<BalanceScale>(preview);
     }
 
     void DisableIfExists<T>(GameObject preview) where T : Behaviour
@@ -694,6 +738,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         buildModeButton = FindButtonByName("建造模式");
         elementModeButton = FindButtonByName("元素模式");
         toggleToolbarButton = FindButtonByName("隐藏");
+        EnsureToolbarButton(BalanceScaleButtonNames, FindButtonByName(FlagButtonNames));
 
         modeButtons.Clear();
         if (buildModeButton != null) modeButtons.Add(buildModeButton);
@@ -713,6 +758,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         AddButtonIfFound(buildToolButtons, "石头");
         AddButtonIfFound(buildToolButtons, "尖刺");
         AddButtonIfFound(buildToolButtons, FlagButtonNames);
+        AddButtonIfFound(buildToolButtons, BalanceScaleButtonNames);
 
         collapsibleUiObjects.Clear();
         AddUiObjectIfFound(toolbarBackground);
@@ -723,8 +769,8 @@ public class SimpleBlockPlacer : MonoBehaviour
         for (int i = 0; i < buildToolButtons.Count; i++)
             AddUiObjectIfFound(buildToolButtons[i].gameObject);
 
-        BindButton(buildModeButton, () => SwitchToBuildMode(CurrentBuildTool));
-        BindButton(elementModeButton, () => SwitchToElementMode(CurrentElementTool));
+        BindButton(buildModeButton, () => SwitchToBuildMode());
+        BindButton(elementModeButton, () => SwitchToElementMode());
         BindButton(toggleToolbarButton, () => SetToolbarExpanded(!toolbarExpanded));
 
         BindButton(FindButtonByName("火"), () => ToggleElementTool(ElementPaintTool.Fire));
@@ -739,6 +785,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         BindButton(FindButtonByName("石头"), () => ToggleBuildTool(BuildTool.StoneBlock));
         BindButton(FindButtonByName("尖刺"), () => ToggleBuildTool(BuildTool.Spike));
         BindButton(FindButtonByName(FlagButtonNames), () => ToggleBuildTool(BuildTool.Flag));
+        BindButton(FindButtonByName(BalanceScaleButtonNames), () => ToggleBuildTool(BuildTool.BalanceScale));
 
         SetToolbarExpanded(toolbarExpanded);
         RefreshToolbarButtons();
@@ -797,6 +844,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         ApplyButtonVisual(FindButtonByName("石头"), hasActiveBuildTool && CurrentBuildTool == BuildTool.StoneBlock);
         ApplyButtonVisual(FindButtonByName("尖刺"), hasActiveBuildTool && CurrentBuildTool == BuildTool.Spike);
         ApplyButtonVisual(FindButtonByName(FlagButtonNames), hasActiveBuildTool && CurrentBuildTool == BuildTool.Flag);
+        ApplyButtonVisual(FindButtonByName(BalanceScaleButtonNames), hasActiveBuildTool && CurrentBuildTool == BuildTool.BalanceScale);
     }
 
     void UpdateModeButtonVisuals()
@@ -830,6 +878,47 @@ public class SimpleBlockPlacer : MonoBehaviour
         }
 
         return null;
+    }
+
+    Button EnsureToolbarButton(string[] objectNames, Button templateButton)
+    {
+        Button existing = FindButtonByName(objectNames);
+        if (existing != null || templateButton == null)
+            return existing;
+
+        GameObject clone = Instantiate(templateButton.gameObject, templateButton.transform.parent);
+        clone.name = objectNames[0];
+        clone.SetActive(templateButton.gameObject.activeSelf);
+
+        Button button = clone.GetComponent<Button>();
+        if (button != null)
+            button.onClick.RemoveAllListeners();
+
+        SetButtonText(button, objectNames[0]);
+        PositionClonedToolbarButton(clone.GetComponent<RectTransform>(), templateButton.GetComponent<RectTransform>());
+        return button;
+    }
+
+    void PositionClonedToolbarButton(RectTransform clonedRect, RectTransform templateRect)
+    {
+        if (clonedRect == null || templateRect == null)
+            return;
+
+        float gap = 8f;
+        float templateWidth = Mathf.Max(1f, templateRect.rect.width);
+        clonedRect.anchorMin = templateRect.anchorMin;
+        clonedRect.anchorMax = templateRect.anchorMax;
+        clonedRect.pivot = templateRect.pivot;
+        clonedRect.sizeDelta = templateRect.sizeDelta;
+        clonedRect.anchoredPosition = templateRect.anchoredPosition + new Vector2(templateWidth + gap, 0f);
+
+        RectTransform backgroundRect = toolbarBackground != null ? toolbarBackground.GetComponent<RectTransform>() : null;
+        if (backgroundRect == null)
+            return;
+
+        float neededWidth = Mathf.Abs(clonedRect.anchoredPosition.x) + templateWidth + gap * 3f;
+        if (neededWidth > backgroundRect.rect.width)
+            backgroundRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, neededWidth);
     }
 
     GameObject FindGameObjectByName(string objectName)
