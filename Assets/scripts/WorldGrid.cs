@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public enum MaterialType
@@ -457,6 +458,8 @@ public class WorldGrid : MonoBehaviour
 
     public void ClearAllMaterials()
     {
+        EnsureGridArrays();
+
         for (int x = 0; x < width; x++)
         {
             for (int y = 0; y < height; y++)
@@ -467,9 +470,76 @@ public class WorldGrid : MonoBehaviour
         }
     }
 
+    public List<MaterialCellData> ExportNonAirMaterials()
+    {
+        EnsureGridArrays();
+
+        List<MaterialCellData> cells = new List<MaterialCellData>();
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                MaterialType material = grid[x, y];
+                if (material == MaterialType.Air)
+                    continue;
+
+                cells.Add(new MaterialCellData
+                {
+                    x = x,
+                    y = y,
+                    material = material
+                });
+            }
+        }
+
+        return cells;
+    }
+
+    public void LoadMaterials(List<MaterialCellData> cells)
+    {
+        EnsureGridArrays();
+        ClearAllMaterials();
+
+        if (cells == null)
+        {
+            Draw();
+            return;
+        }
+
+        for (int i = 0; i < cells.Count; i++)
+        {
+            MaterialCellData cell = cells[i];
+            if (!InBounds(cell.x, cell.y))
+                continue;
+
+            grid[cell.x, cell.y] = cell.material;
+        }
+
+        Draw();
+    }
+
     public bool InBounds(int x, int y)
     {
         return x >= 0 && x < width && y >= 0 && y < height;
+    }
+
+    void EnsureGridArrays()
+    {
+        if (grid == null || grid.GetLength(0) != width || grid.GetLength(1) != height)
+            grid = new MaterialType[width, height];
+
+        if (occupants == null || occupants.GetLength(0) != width || occupants.GetLength(1) != height)
+            occupants = new CellOccupantType[width, height];
+
+        if (tex == null)
+        {
+            tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            tex.filterMode = FilterMode.Point;
+            tex.wrapMode = TextureWrapMode.Clamp;
+        }
+
+        if (sr == null)
+            sr = GetComponent<SpriteRenderer>();
     }
 
     public Vector2Int WorldToGrid(Vector3 worldPos)

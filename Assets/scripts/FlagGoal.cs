@@ -169,6 +169,7 @@ public class FlagGoal : MonoBehaviour
 
         playerScore.AddScore(scoreAmount);
         hasScored = true;
+        LevelManager.Instance?.CompleteLevel(player);
 
         if (disableAfterScore)
         {

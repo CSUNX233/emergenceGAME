@@ -110,6 +110,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         hasActiveElementTool = false;
         currentPrefabToPlace = null;
         EnsureRuntimeToolbar();
+        LevelManager.EnsureInScene(this);
         RefreshToolbarButtons();
     }
 
@@ -207,6 +208,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         GameObject placed = Instantiate(currentPrefabToPlace, placePos, Quaternion.Euler(0f, 0f, placeRotationZ));
         placed.SetActive(true);
         ConfigurePlacedObject(placed);
+        MarkPlacedObject(placed, CurrentBuildTool);
     }
 
     void ConfigurePlacedObject(GameObject placed)
@@ -250,6 +252,31 @@ public class SimpleBlockPlacer : MonoBehaviour
             flagGoal.attachmentLayer = attachmentLayer;
             flagGoal.TryAutoAttach();
         }
+    }
+
+    public GameObject CreatePlacedObjectFromLevel(BuildTool tool, Vector3 position, float rotationZ)
+    {
+        GameObject prefab = GetPrefabForTool(tool);
+        if (prefab == null)
+            return null;
+
+        GameObject placed = Instantiate(prefab, position, Quaternion.Euler(0f, 0f, rotationZ));
+        placed.SetActive(true);
+        ConfigurePlacedObject(placed);
+        MarkPlacedObject(placed, tool);
+        return placed;
+    }
+
+    void MarkPlacedObject(GameObject placed, BuildTool tool)
+    {
+        if (placed == null)
+            return;
+
+        LevelPlacedObject marker = placed.GetComponent<LevelPlacedObject>();
+        if (marker == null)
+            marker = placed.AddComponent<LevelPlacedObject>();
+
+        marker.tool = tool;
     }
 
     public void SwitchToElementMode(ElementPaintTool tool)
