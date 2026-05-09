@@ -125,11 +125,15 @@ public class BalanceScale : MonoBehaviour
     void BuildBasket(string namePrefix, float centerX)
     {
         float halfWidth = basketWidth * 0.5f;
+        float sideInset = 0.04f;
         float bottomY = -basketDrop;
+        float wallCenterY = bottomY + basketWallHeight * 0.5f;
 
         CreateVisualBox(namePrefix + "RopeA", beamRoot, new Vector2(centerX - halfWidth * 0.38f, -0.25f), new Vector2(0.035f, 0.52f), new Color(0.50f, 0.44f, 0.36f), false);
         CreateVisualBox(namePrefix + "RopeB", beamRoot, new Vector2(centerX + halfWidth * 0.38f, -0.25f), new Vector2(0.035f, 0.52f), new Color(0.50f, 0.44f, 0.36f), false);
         CreateVisualBox(namePrefix + "Bottom", beamRoot, new Vector2(centerX, bottomY), new Vector2(basketWidth, 0.08f), new Color(0.55f, 0.47f, 0.36f), true);
+        CreateVisualBox(namePrefix + "LeftWall", beamRoot, new Vector2(centerX - halfWidth + sideInset, wallCenterY), new Vector2(0.08f, basketWallHeight), new Color(0.55f, 0.47f, 0.36f), true);
+        CreateVisualBox(namePrefix + "RightWall", beamRoot, new Vector2(centerX + halfWidth - sideInset, wallCenterY), new Vector2(0.08f, basketWallHeight), new Color(0.55f, 0.47f, 0.36f), true);
     }
 
     Transform CreateWaterVisual(string objectName, float centerX)
