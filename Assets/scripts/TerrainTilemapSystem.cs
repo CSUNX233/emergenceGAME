@@ -13,6 +13,7 @@ public class TerrainTilemapSystem : MonoBehaviour
     public TileBase terrainTile;
     public Color terrainColor = new Color(0.42f, 0.46f, 0.38f, 1f);
     public Color terrainTopColor = new Color(0.55f, 0.62f, 0.42f, 1f);
+    public bool rebuildCollidersForAllChildTilemaps = true;
 
     [SerializeField] private bool builtInitialTerrain;
     [SerializeField] private Tilemap terrainTilemap;
@@ -106,7 +107,15 @@ public class TerrainTilemapSystem : MonoBehaviour
             tilemapObject.AddComponent<TilemapRenderer>();
         }
 
-        GameObject terrainObject = terrainTilemap.gameObject;
+        ConfigureTerrainTilemap(terrainTilemap, 1);
+    }
+
+    void ConfigureTerrainTilemap(Tilemap tilemap, int sortingOrder)
+    {
+        if (tilemap == null)
+            return;
+
+        GameObject terrainObject = tilemap.gameObject;
         terrainObject.transform.localPosition = Vector3.zero;
         terrainObject.transform.localRotation = Quaternion.identity;
         terrainObject.transform.localScale = Vector3.one;
@@ -117,7 +126,7 @@ public class TerrainTilemapSystem : MonoBehaviour
         TilemapRenderer renderer = terrainObject.GetComponent<TilemapRenderer>();
         if (renderer == null)
             renderer = terrainObject.AddComponent<TilemapRenderer>();
-        renderer.sortingOrder = 1;
+        renderer.sortingOrder = sortingOrder;
 
         Rigidbody2D rigidbody2D = terrainObject.GetComponent<Rigidbody2D>();
         if (rigidbody2D == null)
@@ -142,14 +151,33 @@ public class TerrainTilemapSystem : MonoBehaviour
     [ContextMenu("Rebuild Solid Colliders")]
     public void RebuildSolidColliders()
     {
-        if (terrainTilemap == null)
+        EnsureTilemap();
+
+        Tilemap[] tilemaps = rebuildCollidersForAllChildTilemaps
+            ? GetComponentsInChildren<Tilemap>(true)
+            : new[] { terrainTilemap };
+
+        for (int i = 0; i < tilemaps.Length; i++)
+        {
+            Tilemap tilemap = tilemaps[i];
+            if (tilemap == null)
+                continue;
+
+            ConfigureTerrainTilemap(tilemap, i + 1);
+            RebuildSolidColliders(tilemap);
+        }
+    }
+
+    void RebuildSolidColliders(Tilemap tilemap)
+    {
+        if (tilemap == null)
             return;
 
-        Transform collisionRoot = terrainTilemap.transform.Find("Generated Solid Colliders");
+        Transform collisionRoot = tilemap.transform.Find("Generated Solid Colliders");
         if (collisionRoot == null)
         {
             GameObject rootObject = new GameObject("Generated Solid Colliders");
-            rootObject.transform.SetParent(terrainTilemap.transform, false);
+            rootObject.transform.SetParent(tilemap.transform, false);
             collisionRoot = rootObject.transform;
         }
 
@@ -162,36 +190,36 @@ public class TerrainTilemapSystem : MonoBehaviour
                 DestroyImmediate(child);
         }
 
-        BoundsInt bounds = terrainTilemap.cellBounds;
+        BoundsInt bounds = tilemap.cellBounds;
         for (int y = bounds.yMin; y < bounds.yMax; y++)
         {
             int runStart = int.MinValue;
 
             for (int x = bounds.xMin; x <= bounds.xMax; x++)
             {
-                bool hasTile = x < bounds.xMax && terrainTilemap.HasTile(new Vector3Int(x, y, 0));
+                bool hasTile = x < bounds.xMax && tilemap.HasTile(new Vector3Int(x, y, 0));
                 if (hasTile && runStart == int.MinValue)
                     runStart = x;
 
                 if ((!hasTile || x == bounds.xMax) && runStart != int.MinValue)
                 {
                     int runEnd = x - 1;
-                    CreateSolidCollider(collisionRoot, runStart, runEnd, y);
+                    CreateSolidCollider(tilemap, collisionRoot, runStart, runEnd, y);
                     runStart = int.MinValue;
                 }
             }
         }
     }
 
-    void CreateSolidCollider(Transform collisionRoot, int startX, int endX, int y)
+    void CreateSolidCollider(Tilemap sourceTilemap, Transform collisionRoot, int startX, int endX, int y)
     {
         GameObject colliderObject = new GameObject($"Terrain Solid {startX}_{endX}_{y}");
-        colliderObject.layer = terrainTilemap.gameObject.layer;
+        colliderObject.layer = sourceTilemap.gameObject.layer;
         colliderObject.transform.SetParent(collisionRoot, false);
 
         float widthInCells = endX - startX + 1f;
-        Vector3 cellCenter = terrainTilemap.GetCellCenterLocal(new Vector3Int(startX, y, 0));
-        Vector3 lastCellCenter = terrainTilemap.GetCellCenterLocal(new Vector3Int(endX, y, 0));
+        Vector3 cellCenter = sourceTilemap.GetCellCenterLocal(new Vector3Int(startX, y, 0));
+        Vector3 lastCellCenter = sourceTilemap.GetCellCenterLocal(new Vector3Int(endX, y, 0));
         Vector3 center = (cellCenter + lastCellCenter) * 0.5f;
 
         colliderObject.transform.localPosition = center;
