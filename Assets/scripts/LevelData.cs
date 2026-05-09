@@ -13,6 +13,7 @@ public class LevelCollectionData
 public class LevelData
 {
     public string name;
+    public string terrainPrefabId;
     public SerializableVector3 playerSpawn;
     public List<PlacedObjectData> placedObjects = new List<PlacedObjectData>();
     public List<MaterialCellData> materialCells = new List<MaterialCellData>();

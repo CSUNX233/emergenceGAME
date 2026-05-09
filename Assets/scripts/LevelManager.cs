@@ -17,6 +17,11 @@ public class LevelManager : MonoBehaviour
     [Header("Scene UI")]
     public bool bindSceneUI = true;
 
+    [Header("Scene Terrain Variants")]
+    public bool bindSceneTerrainVariants = true;
+    public string level2TerrainName = "Terrain Tilemap";
+    public string level3TerrainName = "Tilemap2";
+
     private LevelCollectionData collection = new LevelCollectionData();
     private PlayerLife playerLife;
     private GameObject levelToggleButtonObject;
@@ -100,6 +105,7 @@ public class LevelManager : MonoBehaviour
 
         SetLevelPanelVisible(false);
         HideResult();
+        ApplyActiveLevelTerrain();
 
         if (hasSavedCollection && ActiveLevel != null)
             LoadActiveLevel();
@@ -286,11 +292,51 @@ public class LevelManager : MonoBehaviour
             collection.levels.Add(new LevelData
             {
                 name = "Level 1",
+                terrainPrefabId = "",
                 playerSpawn = new SerializableVector3(GetDefaultSpawnPoint())
             });
         }
 
+        while (collection.levels.Count < 3)
+        {
+            int levelNumber = collection.levels.Count + 1;
+            collection.levels.Add(new LevelData
+            {
+                name = $"Level {levelNumber}",
+                terrainPrefabId = GetDefaultTerrainIdForLevelNumber(levelNumber),
+                playerSpawn = new SerializableVector3(GetDefaultSpawnPoint())
+            });
+        }
+
+        AssignDefaultTerrainIds();
+
         collection.activeLevelIndex = Mathf.Clamp(collection.activeLevelIndex, 0, collection.levels.Count - 1);
+    }
+
+    void AssignDefaultTerrainIds()
+    {
+        if (collection == null || collection.levels == null)
+            return;
+
+        for (int i = 0; i < collection.levels.Count; i++)
+        {
+            LevelData level = collection.levels[i];
+            if (level == null || !string.IsNullOrEmpty(level.terrainPrefabId))
+                continue;
+
+            level.terrainPrefabId = GetDefaultTerrainIdForLevelNumber(i + 1);
+        }
+    }
+
+    string GetDefaultTerrainIdForLevelNumber(int levelNumber)
+    {
+        if (levelNumber == 2)
+            return level2TerrainName;
+
+        if (levelNumber == 3)
+            return level3TerrainName;
+
+        return "";
     }
 
     public void ToggleLevelPanel()
@@ -340,6 +386,7 @@ public class LevelManager : MonoBehaviour
 
         isLoadingLevel = true;
         HideResult();
+        ApplyActiveLevelTerrain();
         ClearPlacedObjects();
 
         if (worldGrid != null)
@@ -378,6 +425,7 @@ public class LevelManager : MonoBehaviour
         collection.levels.Add(level);
         collection.activeLevelIndex = collection.levels.Count - 1;
         HideResult();
+        ApplyActiveLevelTerrain();
         ClearPlacedObjects();
 
         if (worldGrid != null)
@@ -428,6 +476,33 @@ public class LevelManager : MonoBehaviour
 
         WriteCollectionToDisk();
         UpdateStatus("Spawn set");
+    }
+
+    void ApplyActiveLevelTerrain()
+    {
+        LevelData level = ActiveLevel;
+        ApplySceneTerrainVariant(level != null ? level.terrainPrefabId : "");
+    }
+
+    void ApplySceneTerrainVariant(string terrainPrefabId)
+    {
+        if (!bindSceneTerrainVariants)
+            return;
+
+        GameObject level2Terrain = FindSceneObject(level2TerrainName);
+        GameObject level3Terrain = FindSceneObject(level3TerrainName);
+
+        SetTerrainVariantActive(level2Terrain, terrainPrefabId == level2TerrainName);
+        SetTerrainVariantActive(level3Terrain, terrainPrefabId == level3TerrainName);
+    }
+
+    void SetTerrainVariantActive(GameObject terrainVariant, bool active)
+    {
+        if (terrainVariant == null)
+            return;
+
+        if (terrainVariant.activeSelf != active)
+            terrainVariant.SetActive(active);
     }
 
     public void ReloadCurrentLevelAfterDeath()
