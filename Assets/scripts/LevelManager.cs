@@ -22,6 +22,7 @@ public class LevelManager : MonoBehaviour
     private GameObject levelToggleButtonObject;
     private GameObject levelPanel;
     private GameObject resultPanel;
+    private GameObject levelNameTextObject;
     private UiText levelNameText;
     private UiText levelStatusText;
     private UiText resultTitleText;
@@ -134,8 +135,13 @@ public class LevelManager : MonoBehaviour
         resultPanel = FindSceneObject("ResultPanel");
 
         KeepLevelToggleOutsidePanel();
+        ConfigureLevelPanelRaycasts();
 
-        levelNameText = UiText.Find("TextLevelName");
+        levelNameTextObject = FindSceneObject("TextLevelName");
+        if (levelNameTextObject != null)
+            levelNameTextObject.SetActive(false);
+
+        levelNameText = UiText.FromObject(levelNameTextObject);
         levelStatusText = UiText.Find("TextLevelStatus");
         resultTitleText = UiText.Find("TextResultTitle");
 
@@ -179,6 +185,24 @@ public class LevelManager : MonoBehaviour
         levelToggleButtonObject.transform.SetParent(newParent, true);
         levelToggleButtonObject.transform.SetAsLastSibling();
         levelToggleButtonObject.SetActive(true);
+    }
+
+    void ConfigureLevelPanelRaycasts()
+    {
+        if (levelPanel == null)
+            return;
+
+        Graphic[] graphics = levelPanel.GetComponentsInChildren<Graphic>(true);
+        for (int i = 0; i < graphics.Length; i++)
+        {
+            Graphic graphic = graphics[i];
+            if (graphic == null)
+                continue;
+
+            Selectable selectable = graphic.GetComponentInParent<Selectable>(true);
+            bool belongsToButton = selectable != null && selectable.transform.IsChildOf(levelPanel.transform);
+            graphic.raycastTarget = belongsToButton;
+        }
     }
 
     void BindButton(string objectName, UnityEngine.Events.UnityAction action)
@@ -513,7 +537,7 @@ public class LevelManager : MonoBehaviour
 
     void UpdateStatus(string message)
     {
-        levelNameText.SetText(ActiveLevelName());
+        levelNameText.SetText("");
         levelStatusText.SetText(GetLevelCounterText());
         Debug.Log($"LevelManager: {ActiveLevelName()} {message}");
     }
@@ -548,6 +572,11 @@ public class LevelManager : MonoBehaviour
         public static UiText Find(string objectName)
         {
             GameObject obj = FindSceneObject(objectName);
+            return FromObject(obj);
+        }
+
+        public static UiText FromObject(GameObject obj)
+        {
             if (obj == null)
                 return default;
 
