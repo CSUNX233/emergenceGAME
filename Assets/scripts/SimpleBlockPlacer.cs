@@ -88,6 +88,7 @@ public class SimpleBlockPlacer : MonoBehaviour
     private Button buildExpandButton;
     private bool buildExpanded;
     private bool restoreLevelPanelAfterBuildExpand;
+    private int ignorePlacementThroughFrame = -1;
 
     private static readonly string[] FlagButtonNames = { "旗帜", "Flag", "flag", "终点旗" };
     private static readonly string[] BalanceScaleButtonNames = { "BtnBalanceScale", "天平", "Balance", "BalanceScale", "balance" };
@@ -199,6 +200,9 @@ public class SimpleBlockPlacer : MonoBehaviour
     void HandlePlacement()
     {
         if (CurrentMode != PlayerInputMode.Build || currentPrefabToPlace == null || previewInstance == null)
+            return;
+
+        if (Time.frameCount <= ignorePlacementThroughFrame)
             return;
 
         if (IsPointerOverToolbar || !Input.GetMouseButtonDown(0))
@@ -533,15 +537,23 @@ public class SimpleBlockPlacer : MonoBehaviour
     {
         if (CurrentMode == PlayerInputMode.Build && hasActiveBuildTool && CurrentBuildTool == tool)
         {
-            hasActiveBuildTool = false;
-            DestroyPreview();
-            currentPrefabToPlace = null;
-            RefreshToolbarButtons();
+            ClearActiveSelection();
             return;
         }
 
         SwitchToBuildMode(tool);
         SetBuildExpanded(false);
+    }
+
+    void ClearActiveSelection(bool refresh = true)
+    {
+        hasActiveBuildTool = false;
+        hasActiveElementTool = false;
+        DestroyPreview();
+        currentPrefabToPlace = null;
+
+        if (refresh)
+            RefreshToolbarButtons();
     }
 
     public MaterialType GetSelectedMaterialType()
@@ -1005,7 +1017,11 @@ public class SimpleBlockPlacer : MonoBehaviour
 
         BindButton(buildModeButton, () => SwitchToBuildMode());
         BindButton(elementModeButton, () => SwitchToElementMode());
-        BindButton(toggleToolbarButton, () => SetToolbarExpanded(!toolbarExpanded));
+        BindButton(toggleToolbarButton, () =>
+        {
+            ClearActiveSelection(false);
+            SetToolbarExpanded(!toolbarExpanded);
+        });
         BindButton(buildExpandButton, () => SetBuildExpanded(!buildExpanded));
 
         BindButton(FindButtonByName("BtnFire", "火"), () => ToggleElementTool(ElementPaintTool.Fire));
@@ -1108,7 +1124,10 @@ public class SimpleBlockPlacer : MonoBehaviour
         }
 
         if (buildExpandButton != null)
+        {
             buildExpandButton.gameObject.SetActive(toolbarExpanded && !showElements);
+            SetButtonText(buildExpandButton, buildExpanded ? "收回" : "扩展");
+        }
     }
 
     bool IsPointerOverBlockingUiControl()
@@ -1127,10 +1146,6 @@ public class SimpleBlockPlacer : MonoBehaviour
         {
             GameObject hitObject = uiRaycastResults[i].gameObject;
             if (hitObject == null)
-                continue;
-
-            LevelManager levelManager = LevelManager.Instance;
-            if (levelManager != null && levelManager.ShouldIgnoreLevelUiObject(hitObject))
                 continue;
 
             Selectable selectable = hitObject.GetComponentInParent<Selectable>();
@@ -1198,6 +1213,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         button.onClick.RemoveAllListeners();
         button.onClick.AddListener(() =>
         {
+            ignorePlacementThroughFrame = Time.frameCount + 1;
             action.Invoke();
             if (EventSystem.current != null)
                 EventSystem.current.SetSelectedGameObject(null);

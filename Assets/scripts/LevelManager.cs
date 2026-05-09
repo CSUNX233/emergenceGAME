@@ -24,6 +24,10 @@ public class LevelManager : MonoBehaviour
     public string level2TerrainName = "Terrain Tilemap";
     public string level3TerrainName = "Tilemap2";
 
+    [Header("Level Flow")]
+    public bool autoAdvanceOnClear = true;
+    public float clearAdvanceDelay = 1f;
+
     private LevelCollectionData collection = new LevelCollectionData();
     private PlayerLife playerLife;
     private GameObject levelToggleButtonObject;
@@ -36,6 +40,8 @@ public class LevelManager : MonoBehaviour
     private bool initialized;
     private bool hasSavedCollection;
     private bool isLoadingLevel;
+    private bool isCompletingLevel;
+    private Coroutine clearAdvanceRoutine;
 
     private string SavePath => Path.Combine(Application.persistentDataPath, "levels.json");
 
@@ -410,6 +416,7 @@ public class LevelManager : MonoBehaviour
 
     public void LoadActiveLevel()
     {
+        CancelClearAdvance();
         CacheSceneReferences();
         EnsureDefaultLevel();
 
@@ -440,6 +447,7 @@ public class LevelManager : MonoBehaviour
         }
 
         ResetPlayerToSpawn(level.playerSpawn.ToVector3());
+        isCompletingLevel = false;
         isLoadingLevel = false;
         UpdateStatus("Loaded");
     }
@@ -561,14 +569,54 @@ public class LevelManager : MonoBehaviour
 
     public void HandlePlayerDied(PlayerLife life)
     {
+        CancelClearAdvance();
         ShowResult("DEATH");
         UpdateStatus("Death");
     }
 
     public void CompleteLevel(PlayerMovement2D completedPlayer)
     {
+        if (isCompletingLevel)
+            return;
+
+        isCompletingLevel = true;
         ShowResult("CLEAR");
         UpdateStatus("Clear");
+
+        if (autoAdvanceOnClear)
+            StartClearAdvance();
+    }
+
+    void StartClearAdvance()
+    {
+        if (clearAdvanceRoutine != null)
+            StopCoroutine(clearAdvanceRoutine);
+
+        clearAdvanceRoutine = StartCoroutine(ClearAdvanceRoutine());
+    }
+
+    IEnumerator ClearAdvanceRoutine()
+    {
+        float waitTime = Mathf.Max(0f, clearAdvanceDelay);
+        if (waitTime > 0f)
+            yield return new WaitForSeconds(waitTime);
+        else
+            yield return null;
+
+        clearAdvanceRoutine = null;
+        isCompletingLevel = false;
+        LoadNextLevel();
+    }
+
+    void CancelClearAdvance()
+    {
+        if (clearAdvanceRoutine != null)
+        {
+            StopCoroutine(clearAdvanceRoutine);
+            clearAdvanceRoutine = null;
+        }
+
+        isCompletingLevel = false;
     }
 
     List<PlacedObjectData> CollectPlacedObjects()
