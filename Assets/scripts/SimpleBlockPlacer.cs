@@ -1129,6 +1129,10 @@ public class SimpleBlockPlacer : MonoBehaviour
             if (hitObject == null)
                 continue;
 
+            LevelManager levelManager = LevelManager.Instance;
+            if (levelManager != null && levelManager.ShouldIgnoreLevelUiObject(hitObject))
+                continue;
+
             Selectable selectable = hitObject.GetComponentInParent<Selectable>();
             if (selectable != null && selectable.IsActive() && selectable.IsInteractable())
                 return true;

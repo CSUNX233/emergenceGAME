@@ -13,9 +13,11 @@ public class LevelManager : MonoBehaviour
     public SimpleBlockPlacer blockPlacer;
     public WorldGrid worldGrid;
     public PlayerMovement2D player;
+    public LevelTerrainRegistry terrainRegistry;
 
     [Header("Scene UI")]
     public bool bindSceneUI = true;
+    public bool ignoreLevelUiClicksWhilePlacing = true;
 
     [Header("Scene Terrain Variants")]
     public bool bindSceneTerrainVariants = true;
@@ -126,6 +128,9 @@ public class LevelManager : MonoBehaviour
         if (player == null)
             player = FindObjectOfType<PlayerMovement2D>();
 
+        if (terrainRegistry == null)
+            terrainRegistry = FindObjectOfType<LevelTerrainRegistry>();
+
         if (player != null)
         {
             playerLife = player.GetComponent<PlayerLife>();
@@ -223,10 +228,32 @@ public class LevelManager : MonoBehaviour
         button.onClick.RemoveAllListeners();
         button.onClick.AddListener(() =>
         {
+            if (ShouldIgnoreLevelUiClick())
+                return;
+
             action.Invoke();
             if (UnityEngine.EventSystems.EventSystem.current != null)
                 UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);
         });
+    }
+
+    public bool ShouldIgnoreLevelUiObject(GameObject hitObject)
+    {
+        if (!ShouldIgnoreLevelUiClick() || hitObject == null)
+            return false;
+
+        Transform hitTransform = hitObject.transform;
+        if (levelToggleButtonObject != null && hitTransform.IsChildOf(levelToggleButtonObject.transform))
+            return true;
+
+        return levelPanel != null && hitTransform.IsChildOf(levelPanel.transform);
+    }
+
+    bool ShouldIgnoreLevelUiClick()
+    {
+        return ignoreLevelUiClicksWhilePlacing
+            && blockPlacer != null
+            && blockPlacer.IsPlacementModeActive;
     }
 
     void SetButtonLabel(string objectName, string label)
@@ -330,6 +357,13 @@ public class LevelManager : MonoBehaviour
 
     string GetDefaultTerrainIdForLevelNumber(int levelNumber)
     {
+        if (terrainRegistry != null)
+        {
+            string registryTerrainId = terrainRegistry.GetDefaultTerrainIdForLevel(levelNumber);
+            if (!string.IsNullOrEmpty(registryTerrainId))
+                return registryTerrainId;
+        }
+
         if (levelNumber == 2)
             return level2TerrainName;
 
@@ -481,13 +515,23 @@ public class LevelManager : MonoBehaviour
     void ApplyActiveLevelTerrain()
     {
         LevelData level = ActiveLevel;
-        ApplySceneTerrainVariant(level != null ? level.terrainPrefabId : "");
+        int levelNumber = collection != null ? collection.activeLevelIndex + 1 : 0;
+        ApplySceneTerrainVariant(levelNumber, level != null ? level.terrainPrefabId : "");
     }
 
-    void ApplySceneTerrainVariant(string terrainPrefabId)
+    void ApplySceneTerrainVariant(int levelNumber, string terrainPrefabId)
     {
         if (!bindSceneTerrainVariants)
             return;
+
+        if (terrainRegistry == null)
+            terrainRegistry = FindObjectOfType<LevelTerrainRegistry>();
+
+        if (terrainRegistry != null)
+        {
+            terrainRegistry.ApplyLevelTerrain(levelNumber, terrainPrefabId);
+            return;
+        }
 
         GameObject level2Terrain = FindSceneObject(level2TerrainName);
         GameObject level3Terrain = FindSceneObject(level3TerrainName);
