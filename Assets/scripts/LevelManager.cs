@@ -1,8 +1,8 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using TMPro;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 [DefaultExecutionOrder(1000)]
@@ -14,16 +14,23 @@ public class LevelManager : MonoBehaviour
     public WorldGrid worldGrid;
     public PlayerMovement2D player;
 
-    [Header("Runtime UI")]
-    public bool createRuntimeUI = true;
+    [Header("Scene UI")]
+    public bool bindSceneUI = true;
 
     private LevelCollectionData collection = new LevelCollectionData();
     private PlayerLife playerLife;
-    private Text statusText;
+    private GameObject levelPanel;
+    private GameObject resultPanel;
+    private UiText levelNameText;
+    private UiText levelStatusText;
+    private UiText resultTitleText;
     private bool initialized;
     private bool hasSavedCollection;
     private bool isLoadingLevel;
+
     private string SavePath => Path.Combine(Application.persistentDataPath, "levels.json");
+
+    public bool IsLevelPanelVisible => levelPanel != null && levelPanel.activeSelf;
 
     public LevelData ActiveLevel
     {
@@ -86,15 +93,17 @@ public class LevelManager : MonoBehaviour
         LoadCollectionFromDisk();
         EnsureDefaultLevel();
 
-        if (createRuntimeUI)
-            EnsureRuntimeUI();
+        if (bindSceneUI)
+            BindSceneUI();
+
+        HideResult();
 
         if (hasSavedCollection && ActiveLevel != null)
             LoadActiveLevel();
         else
             ResetPlayerToSpawn(ActiveLevel != null ? ActiveLevel.playerSpawn.ToVector3() : GetDefaultSpawnPoint());
 
-        UpdateStatus("关卡系统就绪");
+        UpdateStatus("Ready");
     }
 
     void CacheSceneReferences()
@@ -114,6 +123,64 @@ public class LevelManager : MonoBehaviour
             if (playerLife == null)
                 playerLife = player.gameObject.AddComponent<PlayerLife>();
         }
+    }
+
+    void BindSceneUI()
+    {
+        levelPanel = FindSceneObject("levelPanel", "LevelPanel");
+        resultPanel = FindSceneObject("ResultPanel");
+
+        levelNameText = UiText.Find("TextLevelName");
+        levelStatusText = UiText.Find("TextLevelStatus");
+        resultTitleText = UiText.Find("TextResultTitle");
+
+        BindButton("level", ToggleLevelPanel);
+        BindButton("BtnLevel", ToggleLevelPanel);
+        BindButton("BtnSaveLevel", SaveCurrentLevel);
+        BindButton("BtnLoadLevel", LoadActiveLevel);
+        BindButton("BtnNewLevel", CreateNewLevel);
+        BindButton("BtnPrevLevel", LoadPreviousLevel);
+        BindButton("BtnNextLevel", LoadNextLevel);
+        BindButton("BtnResetLevel", LoadActiveLevel);
+        BindButton("BtnSetSpawn", SetSpawnToPlayerPosition);
+    }
+
+    void BindButton(string objectName, UnityEngine.Events.UnityAction action)
+    {
+        Button button = FindButton(objectName);
+        if (button == null)
+            return;
+
+        button.onClick.RemoveAllListeners();
+        button.onClick.AddListener(action);
+    }
+
+    Button FindButton(string objectName)
+    {
+        GameObject obj = FindSceneObject(objectName);
+        return obj != null ? obj.GetComponent<Button>() : null;
+    }
+
+    GameObject FindSceneObject(params string[] names)
+    {
+        Transform[] transforms = Resources.FindObjectsOfTypeAll<Transform>();
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            Transform t = transforms[i];
+            if (t == null || t.hideFlags != HideFlags.None)
+                continue;
+            if (!t.gameObject.scene.IsValid())
+                continue;
+
+            string sceneName = t.name.Trim();
+            for (int j = 0; j < names.Length; j++)
+            {
+                if (sceneName == names[j])
+                    return t.gameObject;
+            }
+        }
+
+        return null;
     }
 
     void LoadCollectionFromDisk()
@@ -148,6 +215,20 @@ public class LevelManager : MonoBehaviour
         collection.activeLevelIndex = Mathf.Clamp(collection.activeLevelIndex, 0, collection.levels.Count - 1);
     }
 
+    public void ToggleLevelPanel()
+    {
+        if (levelPanel == null)
+            return;
+
+        levelPanel.SetActive(!levelPanel.activeSelf);
+    }
+
+    public void SetLevelPanelVisible(bool visible)
+    {
+        if (levelPanel != null)
+            levelPanel.SetActive(visible);
+    }
+
     public void SaveCurrentLevel()
     {
         CacheSceneReferences();
@@ -162,7 +243,7 @@ public class LevelManager : MonoBehaviour
         level.materialCells = worldGrid != null ? worldGrid.ExportNonAirMaterials() : new List<MaterialCellData>();
 
         WriteCollectionToDisk();
-        UpdateStatus($"已保存 {level.name}");
+        UpdateStatus("Saved");
     }
 
     public void LoadActiveLevel()
@@ -175,6 +256,7 @@ public class LevelManager : MonoBehaviour
             return;
 
         isLoadingLevel = true;
+        HideResult();
         ClearPlacedObjects();
 
         if (worldGrid != null)
@@ -191,7 +273,7 @@ public class LevelManager : MonoBehaviour
 
         ResetPlayerToSpawn(level.playerSpawn.ToVector3());
         isLoadingLevel = false;
-        UpdateStatus($"已加载 {level.name}");
+        UpdateStatus("Loaded");
     }
 
     public void CreateNewLevel()
@@ -207,6 +289,7 @@ public class LevelManager : MonoBehaviour
 
         collection.levels.Add(level);
         collection.activeLevelIndex = collection.levels.Count - 1;
+        HideResult();
         ClearPlacedObjects();
 
         if (worldGrid != null)
@@ -214,7 +297,7 @@ public class LevelManager : MonoBehaviour
 
         ResetPlayerToSpawn(level.playerSpawn.ToVector3());
         WriteCollectionToDisk();
-        UpdateStatus($"新建 {level.name}");
+        UpdateStatus("New level");
     }
 
     public void LoadPreviousLevel()
@@ -232,7 +315,7 @@ public class LevelManager : MonoBehaviour
         EnsureDefaultLevel();
         if (collection.levels.Count <= 1)
         {
-            UpdateStatus("只有一个关卡");
+            UpdateStatus("Only one level");
             return;
         }
 
@@ -256,7 +339,7 @@ public class LevelManager : MonoBehaviour
             playerLife.SetSpawnPoint(spawn);
 
         WriteCollectionToDisk();
-        UpdateStatus("已设置出生点");
+        UpdateStatus("Spawn set");
     }
 
     public void ReloadCurrentLevelAfterDeath()
@@ -272,12 +355,14 @@ public class LevelManager : MonoBehaviour
 
     public void HandlePlayerDied(PlayerLife life)
     {
-        UpdateStatus("死亡，正在重开");
+        ShowResult("DEATH");
+        UpdateStatus("Death");
     }
 
     public void CompleteLevel(PlayerMovement2D completedPlayer)
     {
-        UpdateStatus($"{ActiveLevelName()} 通关");
+        ShowResult("CLEAR");
+        UpdateStatus("Clear");
     }
 
     List<PlacedObjectData> CollectPlacedObjects()
@@ -321,6 +406,8 @@ public class LevelManager : MonoBehaviour
 
     void ResetPlayerToSpawn(Vector3 spawn)
     {
+        HideResult();
+
         if (playerLife != null)
             playerLife.ResetForLevel(spawn);
         else if (player != null)
@@ -346,114 +433,77 @@ public class LevelManager : MonoBehaviour
         hasSavedCollection = true;
     }
 
-    void EnsureRuntimeUI()
+    void ShowResult(string title)
     {
-        EnsureEventSystem();
+        if (resultPanel != null)
+            resultPanel.SetActive(true);
 
-        Canvas canvas = FindObjectOfType<Canvas>();
-        if (canvas == null)
-        {
-            GameObject canvasObject = new GameObject("Canvas");
-            canvas = canvasObject.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvasObject.AddComponent<CanvasScaler>();
-            canvasObject.AddComponent<GraphicRaycaster>();
-        }
-
-        if (canvas.transform.Find("LevelToolbar") != null)
-            return;
-
-        GameObject root = new GameObject("LevelToolbar");
-        root.transform.SetParent(canvas.transform, false);
-        RectTransform rootRect = root.AddComponent<RectTransform>();
-        rootRect.anchorMin = new Vector2(0f, 1f);
-        rootRect.anchorMax = new Vector2(0f, 1f);
-        rootRect.pivot = new Vector2(0f, 1f);
-        rootRect.anchoredPosition = new Vector2(12f, -56f);
-        rootRect.sizeDelta = new Vector2(660f, 34f);
-
-        Image background = root.AddComponent<Image>();
-        background.color = new Color(0.08f, 0.09f, 0.10f, 0.58f);
-
-        AddButton(root.transform, "保存", new Vector2(8f, -5f), SaveCurrentLevel);
-        AddButton(root.transform, "加载", new Vector2(68f, -5f), LoadActiveLevel);
-        AddButton(root.transform, "新关卡", new Vector2(128f, -5f), CreateNewLevel);
-        AddButton(root.transform, "上一关", new Vector2(208f, -5f), LoadPreviousLevel);
-        AddButton(root.transform, "下一关", new Vector2(288f, -5f), LoadNextLevel);
-        AddButton(root.transform, "重置", new Vector2(368f, -5f), LoadActiveLevel);
-        AddButton(root.transform, "设出生点", new Vector2(428f, -5f), SetSpawnToPlayerPosition, 88f);
-
-        GameObject label = new GameObject("LevelStatus");
-        label.transform.SetParent(root.transform, false);
-        RectTransform labelRect = label.AddComponent<RectTransform>();
-        labelRect.anchorMin = new Vector2(0f, 1f);
-        labelRect.anchorMax = new Vector2(0f, 1f);
-        labelRect.pivot = new Vector2(0f, 1f);
-        labelRect.anchoredPosition = new Vector2(524f, -8f);
-        labelRect.sizeDelta = new Vector2(128f, 22f);
-
-        statusText = label.AddComponent<Text>();
-        statusText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        statusText.fontSize = 13;
-        statusText.alignment = TextAnchor.MiddleLeft;
-        statusText.color = Color.white;
+        resultTitleText.SetText(title);
     }
 
-    Button AddButton(Transform parent, string label, Vector2 position, UnityEngine.Events.UnityAction action, float width = 54f)
+    void HideResult()
     {
-        GameObject obj = new GameObject(label);
-        obj.transform.SetParent(parent, false);
-
-        RectTransform rect = obj.AddComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0f, 1f);
-        rect.anchorMax = new Vector2(0f, 1f);
-        rect.pivot = new Vector2(0f, 1f);
-        rect.anchoredPosition = position;
-        rect.sizeDelta = new Vector2(width, 24f);
-
-        Image image = obj.AddComponent<Image>();
-        image.color = new Color(0.88f, 0.90f, 0.94f, 0.96f);
-
-        Button button = obj.AddComponent<Button>();
-        button.onClick.AddListener(action);
-
-        GameObject textObj = new GameObject("Text");
-        textObj.transform.SetParent(obj.transform, false);
-        RectTransform textRect = textObj.AddComponent<RectTransform>();
-        textRect.anchorMin = Vector2.zero;
-        textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = Vector2.zero;
-        textRect.offsetMax = Vector2.zero;
-
-        Text text = textObj.AddComponent<Text>();
-        text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        text.text = label;
-        text.fontSize = 13;
-        text.alignment = TextAnchor.MiddleCenter;
-        text.color = new Color(0.12f, 0.14f, 0.16f, 1f);
-
-        return button;
-    }
-
-    void EnsureEventSystem()
-    {
-        if (EventSystem.current != null)
-            return;
-
-        new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        if (resultPanel != null)
+            resultPanel.SetActive(false);
     }
 
     void UpdateStatus(string message)
     {
-        if (statusText != null)
-            statusText.text = $"{ActiveLevelName()}  {message}";
-
-        Debug.Log($"LevelManager: {message}");
+        levelNameText.SetText(ActiveLevelName());
+        levelStatusText.SetText(message);
+        Debug.Log($"LevelManager: {ActiveLevelName()} {message}");
     }
 
     string ActiveLevelName()
     {
         LevelData level = ActiveLevel;
         return level != null ? level.name : "No Level";
+    }
+
+    struct UiText
+    {
+        private readonly Text legacyText;
+        private readonly TMP_Text tmpText;
+
+        public UiText(Text legacyText, TMP_Text tmpText)
+        {
+            this.legacyText = legacyText;
+            this.tmpText = tmpText;
+        }
+
+        public static UiText Find(string objectName)
+        {
+            GameObject obj = FindSceneObject(objectName);
+            if (obj == null)
+                return default;
+
+            return new UiText(obj.GetComponent<Text>(), obj.GetComponent<TMP_Text>());
+        }
+
+        public void SetText(string value)
+        {
+            if (legacyText != null)
+                legacyText.text = value;
+
+            if (tmpText != null)
+                tmpText.text = value;
+        }
+
+        static GameObject FindSceneObject(string objectName)
+        {
+            Transform[] transforms = Resources.FindObjectsOfTypeAll<Transform>();
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                Transform t = transforms[i];
+                if (t == null || t.hideFlags != HideFlags.None)
+                    continue;
+                if (!t.gameObject.scene.IsValid())
+                    continue;
+                if (t.name.Trim() == objectName)
+                    return t.gameObject;
+            }
+
+            return null;
+        }
     }
 }

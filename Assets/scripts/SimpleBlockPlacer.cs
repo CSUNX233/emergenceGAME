@@ -81,14 +81,18 @@ public class SimpleBlockPlacer : MonoBehaviour
     private readonly List<Button> modeButtons = new List<Button>();
     private readonly List<Button> elementToolButtons = new List<Button>();
     private readonly List<Button> buildToolButtons = new List<Button>();
+    private readonly List<Button> expandedBuildToolButtons = new List<Button>();
     private readonly List<GameObject> collapsibleUiObjects = new List<GameObject>();
 
-    private readonly Color buttonNormalColor = new Color(0.88f, 0.9f, 0.94f, 1f);
-    private readonly Color buttonSelectedColor = new Color(0.24f, 0.63f, 0.96f, 1f);
-    private readonly Color textNormalColor = new Color(0.16f, 0.18f, 0.22f, 1f);
-    private readonly Color textSelectedColor = Color.white;
+    private Button buildExpandButton;
+    private bool buildExpanded;
+    private bool restoreLevelPanelAfterBuildExpand;
+
     private static readonly string[] FlagButtonNames = { "旗帜", "Flag", "flag", "终点旗" };
-    private static readonly string[] BalanceScaleButtonNames = { "天平", "Balance", "BalanceScale", "balance" };
+    private static readonly string[] BalanceScaleButtonNames = { "BtnBalanceScale", "天平", "Balance", "BalanceScale", "balance" };
+    private static readonly string[] BuildModeButtonNames = { "BtnBuildMode", "建造模式" };
+    private static readonly string[] ElementModeButtonNames = { "BtnElementMode", "元素模式" };
+    private static readonly string[] BuildExpandButtonNames = { "BtnBuildExpand", "BtnExpandBuild", "展开", "Expand" };
     private bool hasActiveBuildTool = false;
     private bool hasActiveElementTool = false;
 
@@ -111,6 +115,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         currentPrefabToPlace = null;
         EnsureRuntimeToolbar();
         LevelManager.EnsureInScene(this);
+        SetBuildExpanded(false, false);
         RefreshToolbarButtons();
     }
 
@@ -340,6 +345,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         }
 
         SwitchToBuildMode(tool);
+        SetBuildExpanded(false);
     }
 
     public MaterialType GetSelectedMaterialType()
@@ -762,30 +768,32 @@ public class SimpleBlockPlacer : MonoBehaviour
         toolbarRoot = FindRectTransformByName("toolbar");
         toolbarBackground = FindGameObjectByName("background");
 
-        buildModeButton = FindButtonByName("建造模式");
-        elementModeButton = FindButtonByName("元素模式");
+        buildModeButton = FindButtonByName(BuildModeButtonNames);
+        elementModeButton = FindButtonByName(ElementModeButtonNames);
         toggleToolbarButton = FindButtonByName("隐藏");
-        EnsureToolbarButton(BalanceScaleButtonNames, FindButtonByName(FlagButtonNames));
+        buildExpandButton = FindButtonByName(BuildExpandButtonNames);
 
         modeButtons.Clear();
         if (buildModeButton != null) modeButtons.Add(buildModeButton);
         if (elementModeButton != null) modeButtons.Add(elementModeButton);
 
         elementToolButtons.Clear();
-        AddButtonIfFound(elementToolButtons, "火");
-        AddButtonIfFound(elementToolButtons, "水");
-        AddButtonIfFound(elementToolButtons, "木");
+        AddButtonIfFound(elementToolButtons, "BtnFire", "火");
+        AddButtonIfFound(elementToolButtons, "BtnWater", "水");
+        AddButtonIfFound(elementToolButtons, "BtnWood", "木");
 
         buildToolButtons.Clear();
-        AddButtonIfFound(buildToolButtons, "转轴");
-        AddButtonIfFound(buildToolButtons, "粘液块");
-        AddButtonIfFound(buildToolButtons, "木板");
-        AddButtonIfFound(buildToolButtons, "木桶");
-        AddButtonIfFound(buildToolButtons, "铁块");
-        AddButtonIfFound(buildToolButtons, "石头");
-        AddButtonIfFound(buildToolButtons, "尖刺");
-        AddButtonIfFound(buildToolButtons, FlagButtonNames);
-        AddButtonIfFound(buildToolButtons, BalanceScaleButtonNames);
+        AddButtonIfFound(buildToolButtons, "BtnAxle", "转轴");
+        AddButtonIfFound(buildToolButtons, "BtnSlimeBlock", "粘液块");
+        AddButtonIfFound(buildToolButtons, "BtnWoodPlank", "木板");
+        AddButtonIfFound(buildToolButtons, "BtnWoodBarrel", "木桶");
+        AddButtonIfFound(buildToolButtons, "BtnIronBlock", "铁块");
+        AddButtonIfFound(buildToolButtons, "BtnStoneBlock", "石头");
+        AddButtonIfFound(buildToolButtons, "BtnSpike", "尖刺");
+        AddButtonIfFound(buildToolButtons, "BtnFlag", "旗帜", "Flag", "flag", "终点旗");
+
+        expandedBuildToolButtons.Clear();
+        AddButtonIfFound(expandedBuildToolButtons, BalanceScaleButtonNames);
 
         collapsibleUiObjects.Clear();
         AddUiObjectIfFound(toolbarBackground);
@@ -795,26 +803,31 @@ public class SimpleBlockPlacer : MonoBehaviour
             AddUiObjectIfFound(elementToolButtons[i].gameObject);
         for (int i = 0; i < buildToolButtons.Count; i++)
             AddUiObjectIfFound(buildToolButtons[i].gameObject);
+        for (int i = 0; i < expandedBuildToolButtons.Count; i++)
+            AddUiObjectIfFound(expandedBuildToolButtons[i].gameObject);
+        AddUiObjectIfFound(buildExpandButton != null ? buildExpandButton.gameObject : null);
 
         BindButton(buildModeButton, () => SwitchToBuildMode());
         BindButton(elementModeButton, () => SwitchToElementMode());
         BindButton(toggleToolbarButton, () => SetToolbarExpanded(!toolbarExpanded));
+        BindButton(buildExpandButton, () => SetBuildExpanded(!buildExpanded));
 
-        BindButton(FindButtonByName("火"), () => ToggleElementTool(ElementPaintTool.Fire));
-        BindButton(FindButtonByName("水"), () => ToggleElementTool(ElementPaintTool.Water));
-        BindButton(FindButtonByName("木"), () => ToggleElementTool(ElementPaintTool.Wood));
+        BindButton(FindButtonByName("BtnFire", "火"), () => ToggleElementTool(ElementPaintTool.Fire));
+        BindButton(FindButtonByName("BtnWater", "水"), () => ToggleElementTool(ElementPaintTool.Water));
+        BindButton(FindButtonByName("BtnWood", "木"), () => ToggleElementTool(ElementPaintTool.Wood));
 
-        BindButton(FindButtonByName("转轴"), () => ToggleBuildTool(BuildTool.Axle));
-        BindButton(FindButtonByName("粘液块"), () => ToggleBuildTool(BuildTool.SlimeBlock));
-        BindButton(FindButtonByName("木板"), () => ToggleBuildTool(BuildTool.WoodPlank));
-        BindButton(FindButtonByName("木桶"), () => ToggleBuildTool(BuildTool.WoodBarrel));
-        BindButton(FindButtonByName("铁块"), () => ToggleBuildTool(BuildTool.IronBlock));
-        BindButton(FindButtonByName("石头"), () => ToggleBuildTool(BuildTool.StoneBlock));
-        BindButton(FindButtonByName("尖刺"), () => ToggleBuildTool(BuildTool.Spike));
-        BindButton(FindButtonByName(FlagButtonNames), () => ToggleBuildTool(BuildTool.Flag));
+        BindButton(FindButtonByName("BtnAxle", "转轴"), () => ToggleBuildTool(BuildTool.Axle));
+        BindButton(FindButtonByName("BtnSlimeBlock", "粘液块"), () => ToggleBuildTool(BuildTool.SlimeBlock));
+        BindButton(FindButtonByName("BtnWoodPlank", "木板"), () => ToggleBuildTool(BuildTool.WoodPlank));
+        BindButton(FindButtonByName("BtnWoodBarrel", "木桶"), () => ToggleBuildTool(BuildTool.WoodBarrel));
+        BindButton(FindButtonByName("BtnIronBlock", "铁块"), () => ToggleBuildTool(BuildTool.IronBlock));
+        BindButton(FindButtonByName("BtnStoneBlock", "石头"), () => ToggleBuildTool(BuildTool.StoneBlock));
+        BindButton(FindButtonByName("BtnSpike", "尖刺"), () => ToggleBuildTool(BuildTool.Spike));
+        BindButton(FindButtonByName("BtnFlag", "旗帜", "Flag", "flag", "终点旗"), () => ToggleBuildTool(BuildTool.Flag));
         BindButton(FindButtonByName(BalanceScaleButtonNames), () => ToggleBuildTool(BuildTool.BalanceScale));
 
         SetToolbarExpanded(toolbarExpanded);
+        SetBuildExpanded(false, false);
         RefreshToolbarButtons();
     }
 
@@ -842,6 +855,38 @@ public class SimpleBlockPlacer : MonoBehaviour
         RefreshToolbarButtons();
     }
 
+    void SetBuildExpanded(bool expanded, bool restoreLevelPanel = true)
+    {
+        if (buildExpanded == expanded)
+        {
+            RefreshToolbarButtons();
+            return;
+        }
+
+        buildExpanded = expanded;
+
+        LevelManager levelManager = LevelManager.Instance;
+        if (expanded)
+        {
+            restoreLevelPanelAfterBuildExpand = levelManager != null && levelManager.IsLevelPanelVisible;
+            if (levelManager != null)
+                levelManager.SetLevelPanelVisible(false);
+        }
+        else if (restoreLevelPanel && restoreLevelPanelAfterBuildExpand)
+        {
+            if (levelManager != null)
+                levelManager.SetLevelPanelVisible(true);
+
+            restoreLevelPanelAfterBuildExpand = false;
+        }
+        else if (!expanded)
+        {
+            restoreLevelPanelAfterBuildExpand = false;
+        }
+
+        RefreshToolbarButtons();
+    }
+
     void RefreshToolbarButtons()
     {
         UpdateModeButtonVisuals();
@@ -859,28 +904,20 @@ public class SimpleBlockPlacer : MonoBehaviour
                 buildToolButtons[i].gameObject.SetActive(toolbarExpanded && !showElements);
         }
 
-        ApplyButtonVisual(FindButtonByName("火"), hasActiveElementTool && CurrentElementTool == ElementPaintTool.Fire);
-        ApplyButtonVisual(FindButtonByName("水"), hasActiveElementTool && CurrentElementTool == ElementPaintTool.Water);
-        ApplyButtonVisual(FindButtonByName("木"), hasActiveElementTool && CurrentElementTool == ElementPaintTool.Wood);
+        bool showExpandedBuildTools = toolbarExpanded && !showElements && buildExpanded;
+        for (int i = 0; i < expandedBuildToolButtons.Count; i++)
+        {
+            if (expandedBuildToolButtons[i] != null)
+                expandedBuildToolButtons[i].gameObject.SetActive(showExpandedBuildTools);
+        }
 
-        ApplyButtonVisual(FindButtonByName("转轴"), hasActiveBuildTool && CurrentBuildTool == BuildTool.Axle);
-        ApplyButtonVisual(FindButtonByName("粘液块"), hasActiveBuildTool && CurrentBuildTool == BuildTool.SlimeBlock);
-        ApplyButtonVisual(FindButtonByName("木板"), hasActiveBuildTool && CurrentBuildTool == BuildTool.WoodPlank);
-        ApplyButtonVisual(FindButtonByName("木桶"), hasActiveBuildTool && CurrentBuildTool == BuildTool.WoodBarrel);
-        ApplyButtonVisual(FindButtonByName("铁块"), hasActiveBuildTool && CurrentBuildTool == BuildTool.IronBlock);
-        ApplyButtonVisual(FindButtonByName("石头"), hasActiveBuildTool && CurrentBuildTool == BuildTool.StoneBlock);
-        ApplyButtonVisual(FindButtonByName("尖刺"), hasActiveBuildTool && CurrentBuildTool == BuildTool.Spike);
-        ApplyButtonVisual(FindButtonByName(FlagButtonNames), hasActiveBuildTool && CurrentBuildTool == BuildTool.Flag);
-        ApplyButtonVisual(FindButtonByName(BalanceScaleButtonNames), hasActiveBuildTool && CurrentBuildTool == BuildTool.BalanceScale);
+        if (buildExpandButton != null)
+            buildExpandButton.gameObject.SetActive(toolbarExpanded && !showElements);
     }
 
     void UpdateModeButtonVisuals()
     {
-        if (modeButtons.Count >= 2)
-        {
-            ApplyButtonVisual(modeButtons[0], CurrentMode == PlayerInputMode.Build);
-            ApplyButtonVisual(modeButtons[1], CurrentMode == PlayerInputMode.Elements);
-        }
+        // Button visuals are controlled in the Unity scene.
     }
 
     RectTransform FindRectTransformByName(string objectName)
@@ -907,47 +944,6 @@ public class SimpleBlockPlacer : MonoBehaviour
         return null;
     }
 
-    Button EnsureToolbarButton(string[] objectNames, Button templateButton)
-    {
-        Button existing = FindButtonByName(objectNames);
-        if (existing != null || templateButton == null)
-            return existing;
-
-        GameObject clone = Instantiate(templateButton.gameObject, templateButton.transform.parent);
-        clone.name = objectNames[0];
-        clone.SetActive(templateButton.gameObject.activeSelf);
-
-        Button button = clone.GetComponent<Button>();
-        if (button != null)
-            button.onClick.RemoveAllListeners();
-
-        SetButtonText(button, objectNames[0]);
-        PositionClonedToolbarButton(clone.GetComponent<RectTransform>(), templateButton.GetComponent<RectTransform>());
-        return button;
-    }
-
-    void PositionClonedToolbarButton(RectTransform clonedRect, RectTransform templateRect)
-    {
-        if (clonedRect == null || templateRect == null)
-            return;
-
-        float gap = 8f;
-        float templateWidth = Mathf.Max(1f, templateRect.rect.width);
-        clonedRect.anchorMin = templateRect.anchorMin;
-        clonedRect.anchorMax = templateRect.anchorMax;
-        clonedRect.pivot = templateRect.pivot;
-        clonedRect.sizeDelta = templateRect.sizeDelta;
-        clonedRect.anchoredPosition = templateRect.anchoredPosition + new Vector2(templateWidth + gap, 0f);
-
-        RectTransform backgroundRect = toolbarBackground != null ? toolbarBackground.GetComponent<RectTransform>() : null;
-        if (backgroundRect == null)
-            return;
-
-        float neededWidth = Mathf.Abs(clonedRect.anchoredPosition.x) + templateWidth + gap * 3f;
-        if (neededWidth > backgroundRect.rect.width)
-            backgroundRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, neededWidth);
-    }
-
     GameObject FindGameObjectByName(string objectName)
     {
         Transform[] allTransforms = Resources.FindObjectsOfTypeAll<Transform>();
@@ -958,7 +954,7 @@ public class SimpleBlockPlacer : MonoBehaviour
                 continue;
             if (!t.gameObject.scene.IsValid())
                 continue;
-            if (t.name == objectName)
+            if (t.name.Trim() == objectName)
                 return t.gameObject;
         }
 
@@ -996,17 +992,7 @@ public class SimpleBlockPlacer : MonoBehaviour
 
     void ApplyButtonVisual(Button button, bool selected)
     {
-        if (button == null)
-            return;
-
-        Image image = button.GetComponent<Image>();
-        if (image != null)
-            image.color = selected ? buttonSelectedColor : buttonNormalColor;
-
-
-        Text label = button.GetComponentInChildren<Text>(true);
-        if (label != null)
-            label.color = selected ? textSelectedColor : textNormalColor;
+        // Button visuals are authored in the scene and are not overridden at runtime.
     }
 
     void SetButtonText(Button button, string text)
