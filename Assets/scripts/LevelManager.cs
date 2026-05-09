@@ -187,8 +187,16 @@ public class LevelManager : MonoBehaviour
         if (button == null)
             return;
 
+        Navigation navigation = button.navigation;
+        navigation.mode = Navigation.Mode.None;
+        button.navigation = navigation;
         button.onClick.RemoveAllListeners();
-        button.onClick.AddListener(action);
+        button.onClick.AddListener(() =>
+        {
+            action.Invoke();
+            if (UnityEngine.EventSystems.EventSystem.current != null)
+                UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);
+        });
     }
 
     void SetButtonLabel(string objectName, string label)
@@ -315,11 +323,16 @@ public class LevelManager : MonoBehaviour
 
         if (blockPlacer != null && level.placedObjects != null)
         {
+            List<GameObject> loadedObjects = new List<GameObject>();
             for (int i = 0; i < level.placedObjects.Count; i++)
             {
                 PlacedObjectData data = level.placedObjects[i];
-                blockPlacer.CreatePlacedObjectFromLevel(data.tool, data.position.ToVector3(), data.rotationZ);
+                GameObject loadedObject = blockPlacer.CreatePlacedObjectFromLevel(data.tool, data.position.ToVector3(), data.rotationZ, true);
+                if (loadedObject != null)
+                    loadedObjects.Add(loadedObject);
             }
+
+            blockPlacer.RestoreLoadedLevelObjects(loadedObjects);
         }
 
         ResetPlayerToSpawn(level.playerSpawn.ToVector3());

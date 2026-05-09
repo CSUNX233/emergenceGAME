@@ -73,7 +73,7 @@ public class StickyAttachBlock : MonoBehaviour
         return positions;
     }
 
-    void AttachToAxle(RotatingAxle axle)
+    public void AttachToAxle(RotatingAxle axle)
     {
         if (axle == null)
             return;

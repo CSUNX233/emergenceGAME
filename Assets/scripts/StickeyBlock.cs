@@ -17,6 +17,7 @@ public class StickyBlock : MonoBehaviour
     public float localAngleOffset;
 
     [Header("Auto Attachment")]
+    public bool autoAttachOnStart = true;
     public float attachSearchRadius = 1.2f;
     public LayerMask attachmentLayer;
 
@@ -43,7 +44,8 @@ public class StickyBlock : MonoBehaviour
 
     void Start()
     {
-        TryAutoAttach();
+        if (autoAttachOnStart)
+            TryAutoAttach();
     }
 
     void OnTriggerEnter2D(Collider2D other)

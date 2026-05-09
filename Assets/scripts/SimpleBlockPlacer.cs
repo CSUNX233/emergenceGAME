@@ -83,6 +83,7 @@ public class SimpleBlockPlacer : MonoBehaviour
     private readonly List<Button> buildToolButtons = new List<Button>();
     private readonly List<Button> expandedBuildToolButtons = new List<Button>();
     private readonly List<GameObject> collapsibleUiObjects = new List<GameObject>();
+    private readonly List<RaycastResult> uiRaycastResults = new List<RaycastResult>();
 
     private Button buildExpandButton;
     private bool buildExpanded;
@@ -102,7 +103,7 @@ public class SimpleBlockPlacer : MonoBehaviour
 
     public bool IsPlacementModeActive => CurrentMode == PlayerInputMode.Build && currentPrefabToPlace != null;
     public bool IsElementPaintActive => CurrentMode == PlayerInputMode.Elements && hasActiveElementTool;
-    public bool IsPointerOverToolbar => showModeUI && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+    public bool IsPointerOverToolbar => showModeUI && IsPointerOverBlockingUiControl();
 
     void Start()
     {
@@ -261,15 +262,210 @@ public class SimpleBlockPlacer : MonoBehaviour
 
     public GameObject CreatePlacedObjectFromLevel(BuildTool tool, Vector3 position, float rotationZ)
     {
+        return CreatePlacedObjectFromLevel(tool, position, rotationZ, false);
+    }
+
+    public GameObject CreatePlacedObjectFromLevel(BuildTool tool, Vector3 position, float rotationZ, bool preserveSavedPose)
+    {
         GameObject prefab = GetPrefabForTool(tool);
         if (prefab == null)
             return null;
 
         GameObject placed = Instantiate(prefab, position, Quaternion.Euler(0f, 0f, rotationZ));
         placed.SetActive(true);
-        ConfigurePlacedObject(placed);
+        if (preserveSavedPose)
+            PrepareLoadedObject(placed);
+        else
+            ConfigurePlacedObject(placed);
         MarkPlacedObject(placed, tool);
         return placed;
+    }
+
+    void PrepareLoadedObject(GameObject placed)
+    {
+        StickyBlock sticky = placed.GetComponent<StickyBlock>();
+        if (sticky != null)
+        {
+            sticky.autoAttachOnStart = false;
+            sticky.attachSearchRadius = attachSearchRadius;
+            sticky.attachmentLayer = attachmentLayer;
+        }
+
+        WoodPlankBlock plank = placed.GetComponent<WoodPlankBlock>();
+        if (plank != null)
+        {
+            plank.attachSearchRadius = attachSearchRadius;
+            plank.attachmentLayer = attachmentLayer;
+        }
+
+        StickyAttachBlock attachedBlock = placed.GetComponent<StickyAttachBlock>();
+        if (attachedBlock != null)
+        {
+            attachedBlock.attachSearchRadius = attachSearchRadius;
+            attachedBlock.attachmentLayer = attachmentLayer;
+        }
+
+        SpikeTrap spikeTrap = placed.GetComponent<SpikeTrap>();
+        if (spikeTrap != null)
+        {
+            spikeTrap.attachSearchRadius = attachSearchRadius;
+            spikeTrap.attachmentLayer = attachmentLayer;
+        }
+
+        FlagGoal flagGoal = placed.GetComponent<FlagGoal>();
+        if (flagGoal != null)
+        {
+            flagGoal.attachSearchRadius = attachSearchRadius;
+            flagGoal.attachmentLayer = attachmentLayer;
+        }
+    }
+
+    public void RestoreLoadedLevelObjects(IList<GameObject> loadedObjects)
+    {
+        if (loadedObjects == null)
+            return;
+
+        RestoreStickyAxleAttachments(loadedObjects);
+        RestoreAttachedBlocksToStickyAxles(loadedObjects);
+    }
+
+    void RestoreStickyAxleAttachments(IList<GameObject> loadedObjects)
+    {
+        List<RotatingAxle> axles = new List<RotatingAxle>();
+        List<StickyBlock> stickyBlocks = new List<StickyBlock>();
+
+        for (int i = 0; i < loadedObjects.Count; i++)
+        {
+            GameObject obj = loadedObjects[i];
+            if (obj == null)
+                continue;
+
+            RotatingAxle axle = obj.GetComponent<RotatingAxle>();
+            if (axle != null)
+                axles.Add(axle);
+
+            StickyBlock sticky = obj.GetComponent<StickyBlock>();
+            if (sticky != null)
+            {
+                sticky.autoAttachOnStart = false;
+                stickyBlocks.Add(sticky);
+            }
+        }
+
+        for (int i = 0; i < axles.Count; i++)
+        {
+            RotatingAxle axle = axles[i];
+            if (axle != null)
+                axle.attachedBlocks.Clear();
+        }
+
+        bool changed;
+        int guard = 0;
+        do
+        {
+            changed = false;
+            guard++;
+
+            for (int i = 0; i < stickyBlocks.Count; i++)
+            {
+                StickyBlock sticky = stickyBlocks[i];
+                if (sticky == null || sticky.isAttached)
+                    continue;
+
+                RotatingAxle axle = FindConnectedAxleForSticky(sticky, axles, stickyBlocks);
+                if (axle == null)
+                    continue;
+
+                axle.AttachBlock(sticky);
+                changed = true;
+            }
+        }
+        while (changed && guard < stickyBlocks.Count + 2);
+    }
+
+    RotatingAxle FindConnectedAxleForSticky(StickyBlock sticky, List<RotatingAxle> axles, List<StickyBlock> stickyBlocks)
+    {
+        Collider2D stickyCollider = sticky != null ? sticky.GetComponent<Collider2D>() : null;
+        if (stickyCollider == null)
+            return null;
+
+        for (int i = 0; i < axles.Count; i++)
+        {
+            RotatingAxle axle = axles[i];
+            if (axle == null)
+                continue;
+
+            Collider2D axleCollider = axle.GetComponent<Collider2D>();
+            if (AreCollidersConnected(stickyCollider, axleCollider, 0.12f))
+                return axle;
+        }
+
+        for (int i = 0; i < stickyBlocks.Count; i++)
+        {
+            StickyBlock other = stickyBlocks[i];
+            if (other == null || other == sticky || !other.isAttached || other.attachedAxle == null)
+                continue;
+
+            Collider2D otherCollider = other.GetComponent<Collider2D>();
+            if (AreCollidersConnected(stickyCollider, otherCollider, 0.12f))
+                return other.attachedAxle;
+        }
+
+        return null;
+    }
+
+    void RestoreAttachedBlocksToStickyAxles(IList<GameObject> loadedObjects)
+    {
+        for (int i = 0; i < loadedObjects.Count; i++)
+        {
+            GameObject obj = loadedObjects[i];
+            if (obj == null)
+                continue;
+
+            WoodPlankBlock plank = obj.GetComponent<WoodPlankBlock>();
+            if (plank != null && !plank.isAttached)
+            {
+                RotatingAxle axle = FindNearbyStickyAxle(plank.GetComponent<Collider2D>());
+                if (axle != null)
+                    plank.AttachToAxle(axle);
+            }
+
+            StickyAttachBlock attachBlock = obj.GetComponent<StickyAttachBlock>();
+            if (attachBlock != null && !attachBlock.isAttached)
+            {
+                RotatingAxle axle = FindNearbyStickyAxle(attachBlock.GetComponent<Collider2D>());
+                if (axle != null)
+                    attachBlock.AttachToAxle(axle);
+            }
+        }
+    }
+
+    RotatingAxle FindNearbyStickyAxle(Collider2D sourceCollider)
+    {
+        if (sourceCollider == null)
+            return null;
+
+        StickyBlock[] stickyBlocks = FindObjectsOfType<StickyBlock>();
+        for (int i = 0; i < stickyBlocks.Length; i++)
+        {
+            StickyBlock sticky = stickyBlocks[i];
+            if (sticky == null || !sticky.isAttached || sticky.attachedAxle == null)
+                continue;
+
+            if (AreCollidersConnected(sourceCollider, sticky.GetComponent<Collider2D>(), 0.12f))
+                return sticky.attachedAxle;
+        }
+
+        return null;
+    }
+
+    bool AreCollidersConnected(Collider2D a, Collider2D b, float tolerance)
+    {
+        if (a == null || b == null)
+            return false;
+
+        ColliderDistance2D distance = a.Distance(b);
+        return distance.isOverlapped || distance.distance <= tolerance;
     }
 
     void MarkPlacedObject(GameObject placed, BuildTool tool)
@@ -915,6 +1111,32 @@ public class SimpleBlockPlacer : MonoBehaviour
             buildExpandButton.gameObject.SetActive(toolbarExpanded && !showElements);
     }
 
+    bool IsPointerOverBlockingUiControl()
+    {
+        if (EventSystem.current == null)
+            return false;
+
+        PointerEventData pointerData = new PointerEventData(EventSystem.current)
+        {
+            position = Input.mousePosition
+        };
+
+        uiRaycastResults.Clear();
+        EventSystem.current.RaycastAll(pointerData, uiRaycastResults);
+        for (int i = 0; i < uiRaycastResults.Count; i++)
+        {
+            GameObject hitObject = uiRaycastResults[i].gameObject;
+            if (hitObject == null)
+                continue;
+
+            Selectable selectable = hitObject.GetComponentInParent<Selectable>();
+            if (selectable != null && selectable.IsActive() && selectable.IsInteractable())
+                return true;
+        }
+
+        return false;
+    }
+
     void UpdateModeButtonVisuals()
     {
         // Button visuals are controlled in the Unity scene.
@@ -966,8 +1188,16 @@ public class SimpleBlockPlacer : MonoBehaviour
         if (button == null)
             return;
 
+        Navigation navigation = button.navigation;
+        navigation.mode = Navigation.Mode.None;
+        button.navigation = navigation;
         button.onClick.RemoveAllListeners();
-        button.onClick.AddListener(action);
+        button.onClick.AddListener(() =>
+        {
+            action.Invoke();
+            if (EventSystem.current != null)
+                EventSystem.current.SetSelectedGameObject(null);
+        });
     }
 
     void AddButtonIfFound(List<Button> list, string objectName)
