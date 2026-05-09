@@ -19,6 +19,7 @@ public class LevelManager : MonoBehaviour
 
     private LevelCollectionData collection = new LevelCollectionData();
     private PlayerLife playerLife;
+    private GameObject levelToggleButtonObject;
     private GameObject levelPanel;
     private GameObject resultPanel;
     private UiText levelNameText;
@@ -96,6 +97,7 @@ public class LevelManager : MonoBehaviour
         if (bindSceneUI)
             BindSceneUI();
 
+        SetLevelPanelVisible(false);
         HideResult();
 
         if (hasSavedCollection && ActiveLevel != null)
@@ -128,11 +130,24 @@ public class LevelManager : MonoBehaviour
     void BindSceneUI()
     {
         levelPanel = FindSceneObject("levelPanel", "LevelPanel");
+        levelToggleButtonObject = FindSceneObject("level", "BtnLevel");
         resultPanel = FindSceneObject("ResultPanel");
+
+        KeepLevelToggleOutsidePanel();
 
         levelNameText = UiText.Find("TextLevelName");
         levelStatusText = UiText.Find("TextLevelStatus");
         resultTitleText = UiText.Find("TextResultTitle");
+
+        SetButtonLabel("level", "Level");
+        SetButtonLabel("BtnLevel", "Level");
+        SetButtonLabel("BtnSaveLevel", "Save Level");
+        SetButtonLabel("BtnLoadLevel", "Load Level");
+        SetButtonLabel("BtnNewLevel", "New Level");
+        SetButtonLabel("BtnPrevLevel", "Previous");
+        SetButtonLabel("BtnNextLevel", "Next");
+        SetButtonLabel("BtnResetLevel", "Reset Level");
+        SetButtonLabel("BtnSetSpawn", "Set Spawn");
 
         BindButton("level", ToggleLevelPanel);
         BindButton("BtnLevel", ToggleLevelPanel);
@@ -145,6 +160,27 @@ public class LevelManager : MonoBehaviour
         BindButton("BtnSetSpawn", SetSpawnToPlayerPosition);
     }
 
+    void KeepLevelToggleOutsidePanel()
+    {
+        if (levelToggleButtonObject == null || levelPanel == null)
+            return;
+
+        if (!levelToggleButtonObject.transform.IsChildOf(levelPanel.transform))
+            return;
+
+        Transform newParent = levelPanel.transform.parent;
+        Canvas canvas = FindObjectOfType<Canvas>();
+        if (newParent == null && canvas != null)
+            newParent = canvas.transform;
+
+        if (newParent == null)
+            return;
+
+        levelToggleButtonObject.transform.SetParent(newParent, true);
+        levelToggleButtonObject.transform.SetAsLastSibling();
+        levelToggleButtonObject.SetActive(true);
+    }
+
     void BindButton(string objectName, UnityEngine.Events.UnityAction action)
     {
         Button button = FindButton(objectName);
@@ -153,6 +189,16 @@ public class LevelManager : MonoBehaviour
 
         button.onClick.RemoveAllListeners();
         button.onClick.AddListener(action);
+    }
+
+    void SetButtonLabel(string objectName, string label)
+    {
+        GameObject obj = FindSceneObject(objectName);
+        if (obj == null)
+            return;
+
+        UiText text = UiText.FindInChildren(obj);
+        text.SetText(label);
     }
 
     Button FindButton(string objectName)
@@ -221,12 +267,17 @@ public class LevelManager : MonoBehaviour
             return;
 
         levelPanel.SetActive(!levelPanel.activeSelf);
+        if (levelToggleButtonObject != null)
+            levelToggleButtonObject.SetActive(true);
     }
 
     public void SetLevelPanelVisible(bool visible)
     {
         if (levelPanel != null)
             levelPanel.SetActive(visible);
+
+        if (levelToggleButtonObject != null)
+            levelToggleButtonObject.SetActive(true);
     }
 
     public void SaveCurrentLevel()
@@ -450,7 +501,7 @@ public class LevelManager : MonoBehaviour
     void UpdateStatus(string message)
     {
         levelNameText.SetText(ActiveLevelName());
-        levelStatusText.SetText(message);
+        levelStatusText.SetText(GetLevelCounterText());
         Debug.Log($"LevelManager: {ActiveLevelName()} {message}");
     }
 
@@ -458,6 +509,16 @@ public class LevelManager : MonoBehaviour
     {
         LevelData level = ActiveLevel;
         return level != null ? level.name : "No Level";
+    }
+
+    string GetLevelCounterText()
+    {
+        int total = collection != null && collection.levels != null ? collection.levels.Count : 0;
+        if (total <= 0)
+            return "Level 0 / 0";
+
+        int current = Mathf.Clamp(collection.activeLevelIndex + 1, 1, total);
+        return $"Level {current} / {total}";
     }
 
     struct UiText
@@ -478,6 +539,17 @@ public class LevelManager : MonoBehaviour
                 return default;
 
             return new UiText(obj.GetComponent<Text>(), obj.GetComponent<TMP_Text>());
+        }
+
+        public static UiText FindInChildren(GameObject obj)
+        {
+            if (obj == null)
+                return default;
+
+            return new UiText(
+                obj.GetComponentInChildren<Text>(true),
+                obj.GetComponentInChildren<TMP_Text>(true)
+            );
         }
 
         public void SetText(string value)
