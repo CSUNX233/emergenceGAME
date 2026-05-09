@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Tilemaps;
 
 [DisallowMultipleComponent]
 public class LevelTerrainRegistry : MonoBehaviour
 {
+    public string terrainLayerName = "PlaceBlock";
     public bool disableUnselectedTerrains = true;
     public bool hideUnboundChildTerrains = true;
     public Transform terrainContainer;
@@ -47,6 +49,7 @@ public class LevelTerrainRegistry : MonoBehaviour
         if (IsSceneObject(selected.terrainRoot))
         {
             selected.terrainRoot.SetActive(true);
+            ConfigureTerrainObject(selected.terrainRoot);
             StripGeneratedSolidColliders(selected.terrainRoot);
         }
         else
@@ -57,6 +60,7 @@ public class LevelTerrainRegistry : MonoBehaviour
             runtimeTerrainInstance.transform.localRotation = Quaternion.identity;
             runtimeTerrainInstance.transform.localScale = Vector3.one;
             runtimeTerrainInstance.SetActive(true);
+            ConfigureTerrainObject(runtimeTerrainInstance);
             StripGeneratedSolidColliders(runtimeTerrainInstance);
         }
     }
@@ -116,6 +120,50 @@ public class LevelTerrainRegistry : MonoBehaviour
     bool IsSceneObject(GameObject obj)
     {
         return obj != null && obj.scene.IsValid();
+    }
+
+    void ConfigureTerrainObject(GameObject root)
+    {
+        if (root == null)
+            return;
+
+        Tilemap[] tilemaps = root.GetComponentsInChildren<Tilemap>(true);
+        for (int i = 0; i < tilemaps.Length; i++)
+            ConfigureTilemapCollision(tilemaps[i]);
+    }
+
+    void ConfigureTilemapCollision(Tilemap tilemap)
+    {
+        if (tilemap == null)
+            return;
+
+        GameObject tilemapObject = tilemap.gameObject;
+        int layer = LayerMask.NameToLayer(terrainLayerName);
+        tilemapObject.layer = layer >= 0 ? layer : tilemapObject.layer;
+
+        Rigidbody2D rigidbody2D = tilemapObject.GetComponent<Rigidbody2D>();
+        if (rigidbody2D == null)
+            rigidbody2D = tilemapObject.AddComponent<Rigidbody2D>();
+
+        rigidbody2D.bodyType = RigidbodyType2D.Static;
+        rigidbody2D.simulated = true;
+
+        CompositeCollider2D composite = tilemapObject.GetComponent<CompositeCollider2D>();
+        if (composite == null)
+            composite = tilemapObject.AddComponent<CompositeCollider2D>();
+
+        composite.geometryType = CompositeCollider2D.GeometryType.Polygons;
+
+        TilemapCollider2D tilemapCollider = tilemapObject.GetComponent<TilemapCollider2D>();
+        if (tilemapCollider == null)
+            tilemapCollider = tilemapObject.AddComponent<TilemapCollider2D>();
+
+        tilemapCollider.enabled = true;
+        tilemapCollider.usedByComposite = true;
+
+        TerrainTilemapSurface surface = tilemapObject.GetComponent<TerrainTilemapSurface>();
+        if (surface == null)
+            tilemapObject.AddComponent<TerrainTilemapSurface>();
     }
 
     void StripGeneratedSolidColliders(GameObject root)
