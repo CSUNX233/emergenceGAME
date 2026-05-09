@@ -50,7 +50,6 @@ public class LevelTerrainRegistry : MonoBehaviour
         {
             selected.terrainRoot.SetActive(true);
             ConfigureTerrainObject(selected.terrainRoot);
-            StripGeneratedSolidColliders(selected.terrainRoot);
         }
         else
         {
@@ -61,7 +60,6 @@ public class LevelTerrainRegistry : MonoBehaviour
             runtimeTerrainInstance.transform.localScale = Vector3.one;
             runtimeTerrainInstance.SetActive(true);
             ConfigureTerrainObject(runtimeTerrainInstance);
-            StripGeneratedSolidColliders(runtimeTerrainInstance);
         }
     }
 
@@ -153,36 +151,81 @@ public class LevelTerrainRegistry : MonoBehaviour
             composite = tilemapObject.AddComponent<CompositeCollider2D>();
 
         composite.geometryType = CompositeCollider2D.GeometryType.Polygons;
+        composite.enabled = false;
 
         TilemapCollider2D tilemapCollider = tilemapObject.GetComponent<TilemapCollider2D>();
         if (tilemapCollider == null)
             tilemapCollider = tilemapObject.AddComponent<TilemapCollider2D>();
 
-        tilemapCollider.enabled = true;
-        tilemapCollider.usedByComposite = true;
+        tilemapCollider.usedByComposite = false;
+        tilemapCollider.enabled = false;
 
         TerrainTilemapSurface surface = tilemapObject.GetComponent<TerrainTilemapSurface>();
         if (surface == null)
             tilemapObject.AddComponent<TerrainTilemapSurface>();
+
+        RebuildSolidColliders(tilemap);
     }
 
-    void StripGeneratedSolidColliders(GameObject root)
+    void RebuildSolidColliders(Tilemap tilemap)
     {
-        if (root == null)
+        if (tilemap == null)
             return;
 
-        Transform[] children = root.GetComponentsInChildren<Transform>(true);
-        for (int i = children.Length - 1; i >= 0; i--)
+        Transform collisionRoot = tilemap.transform.Find("Generated Solid Colliders");
+        if (collisionRoot == null)
         {
-            Transform child = children[i];
-            if (child == null || child == root.transform || child.name != "Generated Solid Colliders")
-                continue;
-
-            if (Application.isPlaying)
-                Destroy(child.gameObject);
-            else
-                DestroyImmediate(child.gameObject);
+            GameObject rootObject = new GameObject("Generated Solid Colliders");
+            rootObject.transform.SetParent(tilemap.transform, false);
+            collisionRoot = rootObject.transform;
         }
+        else
+        {
+            for (int i = collisionRoot.childCount - 1; i >= 0; i--)
+            {
+                GameObject child = collisionRoot.GetChild(i).gameObject;
+                if (Application.isPlaying)
+                    Destroy(child);
+                else
+                    DestroyImmediate(child);
+            }
+        }
+
+        BoundsInt bounds = tilemap.cellBounds;
+        for (int y = bounds.yMin; y < bounds.yMax; y++)
+        {
+            int runStart = int.MinValue;
+
+            for (int x = bounds.xMin; x <= bounds.xMax; x++)
+            {
+                bool hasTile = x < bounds.xMax && tilemap.HasTile(new Vector3Int(x, y, 0));
+                if (hasTile && runStart == int.MinValue)
+                    runStart = x;
+
+                if ((!hasTile || x == bounds.xMax) && runStart != int.MinValue)
+                {
+                    int runEnd = x - 1;
+                    CreateSolidCollider(tilemap, collisionRoot, runStart, runEnd, y);
+                    runStart = int.MinValue;
+                }
+            }
+        }
+    }
+
+    void CreateSolidCollider(Tilemap sourceTilemap, Transform collisionRoot, int startX, int endX, int y)
+    {
+        GameObject colliderObject = new GameObject($"Terrain Solid {startX}_{endX}_{y}");
+        colliderObject.layer = sourceTilemap.gameObject.layer;
+        colliderObject.transform.SetParent(collisionRoot, false);
+
+        float widthInCells = endX - startX + 1f;
+        Vector3 cellCenter = sourceTilemap.GetCellCenterLocal(new Vector3Int(startX, y, 0));
+        Vector3 lastCellCenter = sourceTilemap.GetCellCenterLocal(new Vector3Int(endX, y, 0));
+        Vector3 center = (cellCenter + lastCellCenter) * 0.5f;
+
+        colliderObject.transform.localPosition = center;
+        BoxCollider2D box = colliderObject.AddComponent<BoxCollider2D>();
+        box.size = new Vector2(widthInCells, 1f);
     }
 
     LevelTerrainBinding FindBinding(int levelNumber, string terrainPrefabId)
