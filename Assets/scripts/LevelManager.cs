@@ -147,13 +147,13 @@ public class LevelManager : MonoBehaviour
 
         SetButtonLabel("level", "Level");
         SetButtonLabel("BtnLevel", "Level");
-        SetButtonLabel("BtnSaveLevel", "Save Level");
-        SetButtonLabel("BtnLoadLevel", "Load Level");
-        SetButtonLabel("BtnNewLevel", "New Level");
-        SetButtonLabel("BtnPrevLevel", "Previous");
-        SetButtonLabel("BtnNextLevel", "Next");
-        SetButtonLabel("BtnResetLevel", "Reset Level");
-        SetButtonLabel("BtnSetSpawn", "Set Spawn");
+        SetButtonLabel("BtnSaveLevel", "save");
+        SetButtonLabel("BtnLoadLevel", "load");
+        SetButtonLabel("BtnNewLevel", "new");
+        SetButtonLabel("BtnPrevLevel", "previous");
+        SetButtonLabel("BtnNextLevel", "next");
+        SetButtonLabel("BtnResetLevel", "Reset");
+        SetButtonLabel("BtnSetSpawn", "spawn");
 
         BindButton("level", ToggleLevelPanel);
         BindButton("BtnLevel", ToggleLevelPanel);

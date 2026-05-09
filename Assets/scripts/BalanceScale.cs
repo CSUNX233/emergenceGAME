@@ -4,6 +4,8 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public class BalanceScale : MonoBehaviour
 {
+    public WorldGrid worldGrid;
+
     [Header("Shape")]
     public float beamWidth = 4.4f;
     public float basketWidth = 1.15f;
@@ -16,12 +18,23 @@ public class BalanceScale : MonoBehaviour
     public float tiltSmoothTime = 0.22f;
     public LayerMask weightLayers = ~0;
 
+    [Header("Water")]
+    public float waterCapacityPerBasket = 2.4f;
+    public float waterWeightMultiplier = 0.9f;
+    public float waterUnitsPerGridCell = 0.12f;
+    public float objectDisplacementMultiplier = 0.55f;
+    public Color waterColor = new Color(0.22f, 0.58f, 1f, 0.64f);
+
     private Transform beamRoot;
     private Rigidbody2D beamBody;
+    private Transform leftWaterVisual;
+    private Transform rightWaterVisual;
     private readonly Collider2D[] overlapHits = new Collider2D[48];
     private readonly HashSet<int> countedObjects = new HashSet<int>();
     private float currentTilt;
     private float tiltVelocity;
+    private float leftWaterAmount;
+    private float rightWaterAmount;
 
     public static GameObject CreateRuntimePrefab()
     {
@@ -50,8 +63,13 @@ public class BalanceScale : MonoBehaviour
     {
         EnsureBuilt();
 
-        float leftWeight = SampleBasketWeight(-GetBasketCenterX());
-        float rightWeight = SampleBasketWeight(GetBasketCenterX());
+        UpdateWaterStorage(-1, ref leftWaterAmount);
+        UpdateWaterStorage(1, ref rightWaterAmount);
+        UpdateWaterVisual(leftWaterVisual, -GetBasketCenterX(), leftWaterAmount);
+        UpdateWaterVisual(rightWaterVisual, GetBasketCenterX(), rightWaterAmount);
+
+        float leftWeight = SampleBasketWeight(-GetBasketCenterX()) + leftWaterAmount * waterWeightMultiplier;
+        float rightWeight = SampleBasketWeight(GetBasketCenterX()) + rightWaterAmount * waterWeightMultiplier;
         float targetTilt = Mathf.Clamp(
             (leftWeight - rightWeight) * degreesPerWeightDifference,
             -maxTiltDegrees,
@@ -67,6 +85,9 @@ public class BalanceScale : MonoBehaviour
     {
         if (beamRoot != null)
             return;
+
+        if (worldGrid == null)
+            worldGrid = FindObjectOfType<WorldGrid>();
 
         beamRoot = new GameObject("BeamAndBaskets").transform;
         beamRoot.SetParent(transform, false);
@@ -97,6 +118,8 @@ public class BalanceScale : MonoBehaviour
         float basketCenterX = GetBasketCenterX();
         BuildBasket("LeftBasket", -basketCenterX);
         BuildBasket("RightBasket", basketCenterX);
+        leftWaterVisual = CreateWaterVisual("LeftWater", -basketCenterX);
+        rightWaterVisual = CreateWaterVisual("RightWater", basketCenterX);
     }
 
     void BuildBasket(string namePrefix, float centerX)
@@ -111,6 +134,17 @@ public class BalanceScale : MonoBehaviour
         CreateVisualBox(namePrefix + "Bottom", beamRoot, new Vector2(centerX, bottomY), new Vector2(basketWidth, 0.08f), new Color(0.55f, 0.47f, 0.36f), true);
         CreateVisualBox(namePrefix + "LeftWall", beamRoot, new Vector2(centerX - halfWidth + sideInset, wallCenterY), new Vector2(0.08f, basketWallHeight), new Color(0.55f, 0.47f, 0.36f), true);
         CreateVisualBox(namePrefix + "RightWall", beamRoot, new Vector2(centerX + halfWidth - sideInset, wallCenterY), new Vector2(0.08f, basketWallHeight), new Color(0.55f, 0.47f, 0.36f), true);
+    }
+
+    Transform CreateWaterVisual(string objectName, float centerX)
+    {
+        GameObject water = CreateVisualBox(objectName, beamRoot, Vector2.zero, Vector2.one, waterColor, false);
+        SpriteRenderer renderer = water.GetComponent<SpriteRenderer>();
+        if (renderer != null)
+            renderer.sortingOrder = 11;
+
+        water.SetActive(false);
+        return water.transform;
     }
 
     GameObject CreateVisualBox(string objectName, Transform parent, Vector2 localPosition, Vector2 size, Color color, bool withCollider)
@@ -133,6 +167,135 @@ public class BalanceScale : MonoBehaviour
         }
 
         return box;
+    }
+
+    void UpdateWaterStorage(int side, ref float waterAmount)
+    {
+        if (worldGrid == null)
+            worldGrid = FindObjectOfType<WorldGrid>();
+
+        if (worldGrid == null || beamRoot == null)
+            return;
+
+        CaptureWaterCells(side, ref waterAmount);
+
+        float availableCapacity = Mathf.Max(0f, waterCapacityPerBasket - GetObjectDisplacement(side));
+        if (waterAmount > availableCapacity)
+            waterAmount -= EmitWater(side, waterAmount - availableCapacity);
+
+        waterAmount = Mathf.Clamp(waterAmount, 0f, waterCapacityPerBasket);
+    }
+
+    void CaptureWaterCells(int side, ref float waterAmount)
+    {
+        if (waterAmount >= waterCapacityPerBasket)
+            return;
+
+        float localCenterX = side * GetBasketCenterX();
+        Vector2 localCenter = new Vector2(localCenterX, -basketDrop + basketWallHeight * 0.44f);
+        Vector2 localSize = GetBasketInteriorSize();
+        GetBasketGridBounds(localCenter, localSize, out int minX, out int maxX, out int minY, out int maxY);
+
+        for (int x = minX; x <= maxX && waterAmount < waterCapacityPerBasket; x++)
+        {
+            for (int y = minY; y <= maxY && waterAmount < waterCapacityPerBasket; y++)
+            {
+                if (!worldGrid.IsWaterCell(x, y))
+                    continue;
+
+                if (worldGrid.TrySetMaterial(x, y, MaterialType.Air))
+                    waterAmount += waterUnitsPerGridCell;
+            }
+        }
+    }
+
+    void GetBasketGridBounds(Vector2 localCenter, Vector2 localSize, out int minX, out int maxX, out int minY, out int maxY)
+    {
+        Vector2 halfSize = localSize * 0.5f;
+        Vector2Int a = worldGrid.WorldToGrid(beamRoot.TransformPoint(localCenter + new Vector2(-halfSize.x, -halfSize.y)));
+        Vector2Int b = worldGrid.WorldToGrid(beamRoot.TransformPoint(localCenter + new Vector2(-halfSize.x, halfSize.y)));
+        Vector2Int c = worldGrid.WorldToGrid(beamRoot.TransformPoint(localCenter + new Vector2(halfSize.x, -halfSize.y)));
+        Vector2Int d = worldGrid.WorldToGrid(beamRoot.TransformPoint(localCenter + new Vector2(halfSize.x, halfSize.y)));
+
+        minX = Mathf.Min(Mathf.Min(a.x, b.x), Mathf.Min(c.x, d.x));
+        maxX = Mathf.Max(Mathf.Max(a.x, b.x), Mathf.Max(c.x, d.x));
+        minY = Mathf.Min(Mathf.Min(a.y, b.y), Mathf.Min(c.y, d.y));
+        maxY = Mathf.Max(Mathf.Max(a.y, b.y), Mathf.Max(c.y, d.y));
+    }
+
+    float GetObjectDisplacement(int side)
+    {
+        float localCenterX = side * GetBasketCenterX();
+        Vector2 localCenter = new Vector2(localCenterX, -basketDrop + basketWallHeight * 0.45f);
+        Vector2 worldCenter = beamRoot.TransformPoint(localCenter);
+        Vector2 size = GetBasketInteriorSize();
+        int hitCount = Physics2D.OverlapBoxNonAlloc(worldCenter, size, beamRoot.eulerAngles.z, overlapHits, weightLayers);
+
+        countedObjects.Clear();
+        float displacement = 0f;
+        float basketArea = Mathf.Max(0.01f, size.x * size.y);
+
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider2D hit = overlapHits[i];
+            if (hit == null || hit.transform.IsChildOf(transform))
+                continue;
+
+            Rigidbody2D body = hit.attachedRigidbody;
+            int id = body != null ? body.GetInstanceID() : hit.gameObject.GetInstanceID();
+            if (!countedObjects.Add(id))
+                continue;
+
+            Bounds bounds = hit.bounds;
+            float area = Mathf.Max(0.04f, bounds.size.x * bounds.size.y);
+            displacement += waterCapacityPerBasket * Mathf.Clamp01(area / basketArea) * objectDisplacementMultiplier;
+        }
+
+        return Mathf.Clamp(displacement, 0f, waterCapacityPerBasket);
+    }
+
+    float EmitWater(int side, float requestedAmount)
+    {
+        float released = 0f;
+        int maxCells = Mathf.CeilToInt(requestedAmount / Mathf.Max(0.001f, waterUnitsPerGridCell));
+        float localCenterX = side * GetBasketCenterX();
+        float halfWidth = basketWidth * 0.5f;
+        float topY = -basketDrop + basketWallHeight + 0.06f;
+
+        for (int i = 0; i < maxCells && released < requestedAmount; i++)
+        {
+            float sideBias = i % 2 == 0 ? side : -side;
+            float localX = localCenterX + sideBias * (halfWidth + 0.06f + (i / 2) * 0.08f);
+            float localY = topY + (i / 4) * worldGrid.CellHeight;
+            Vector2Int cell = worldGrid.WorldToGrid(beamRoot.TransformPoint(new Vector2(localX, localY)));
+
+            if (!worldGrid.TrySetMaterial(cell.x, cell.y, MaterialType.Water))
+                continue;
+
+            released += waterUnitsPerGridCell;
+        }
+
+        return Mathf.Min(released, requestedAmount);
+    }
+
+    void UpdateWaterVisual(Transform waterVisual, float localCenterX, float waterAmount)
+    {
+        if (waterVisual == null)
+            return;
+
+        float fill01 = waterCapacityPerBasket > 0.001f ? Mathf.Clamp01(waterAmount / waterCapacityPerBasket) : 0f;
+        if (fill01 <= 0.01f)
+        {
+            waterVisual.gameObject.SetActive(false);
+            return;
+        }
+
+        waterVisual.gameObject.SetActive(true);
+        Vector2 interiorSize = GetBasketInteriorSize();
+        float height = Mathf.Max(0.03f, interiorSize.y * fill01);
+        float bottomY = -basketDrop + 0.06f;
+        waterVisual.localPosition = new Vector3(localCenterX, bottomY + height * 0.5f, 0f);
+        waterVisual.localScale = new Vector3(interiorSize.x, height, 1f);
     }
 
     float SampleBasketWeight(float localCenterX)
@@ -166,6 +329,11 @@ public class BalanceScale : MonoBehaviour
         }
 
         return totalWeight;
+    }
+
+    Vector2 GetBasketInteriorSize()
+    {
+        return new Vector2(Mathf.Max(0.1f, basketWidth - 0.18f), basketWallHeight + 0.08f);
     }
 
     float GetWeight(Collider2D hit, Rigidbody2D body)
