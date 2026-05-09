@@ -235,7 +235,7 @@ public class LevelManager : MonoBehaviour
         button.onClick.AddListener(() =>
         {
             if (ShouldIgnoreLevelUiClick())
-                return;
+                blockPlacer.ClearActiveSelection();
 
             action.Invoke();
             if (UnityEngine.EventSystems.EventSystem.current != null)

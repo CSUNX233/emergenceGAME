@@ -26,7 +26,8 @@ public enum BuildTool
     StoneBlock,
     Spike,
     Flag,
-    BalanceScale
+    BalanceScale,
+    Firecracker
 }
 
 public class SimpleBlockPlacer : MonoBehaviour
@@ -41,6 +42,7 @@ public class SimpleBlockPlacer : MonoBehaviour
     public GameObject spikePrefab;
     public GameObject flagPrefab;
     public GameObject balanceScalePrefab;
+    public GameObject firecrackerPrefab;
 
     [Header("Snap Size")]
     public float snapSize = 1f;
@@ -92,6 +94,7 @@ public class SimpleBlockPlacer : MonoBehaviour
 
     private static readonly string[] FlagButtonNames = { "旗帜", "Flag", "flag", "终点旗" };
     private static readonly string[] BalanceScaleButtonNames = { "BtnBalanceScale", "天平", "Balance", "BalanceScale", "balance" };
+    private static readonly string[] FirecrackerButtonNames = { "BtnFirecracker", "Firecracker", "firecracker", "鞭炮" };
     private static readonly string[] BuildModeButtonNames = { "BtnBuildMode", "建造模式" };
     private static readonly string[] ElementModeButtonNames = { "BtnElementMode", "元素模式" };
     private static readonly string[] BuildExpandButtonNames = { "BtnBuildExpand", "BtnExpandBuild", "展开", "Expand" };
@@ -176,7 +179,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         mousePos.z = 0f;
 
         Vector3 desiredPos = GetSnappedPosition(mousePos);
-        bool canPlace = TryGetPlacementPosition(currentPrefabToPlace, desiredPos, currentRotationZ, out Vector3 previewPos, out float previewRotationZ, out bool willAttach);
+        bool canPlace = TryGetPlacementPosition(currentPrefabToPlace, desiredPos, currentRotationZ, out Vector3 previewPos, out float previewRotationZ, out bool willAttach, out _);
         previewInstance.transform.position = previewPos;
         previewInstance.transform.rotation = Quaternion.Euler(0f, 0f, previewRotationZ);
 
@@ -212,16 +215,17 @@ public class SimpleBlockPlacer : MonoBehaviour
         mousePos.z = 0f;
         Vector3 desiredPos = GetSnappedPosition(mousePos);
 
-        if (!TryGetPlacementPosition(currentPrefabToPlace, desiredPos, currentRotationZ, out Vector3 placePos, out float placeRotationZ, out _))
+        if (!TryGetPlacementPosition(currentPrefabToPlace, desiredPos, currentRotationZ, out Vector3 placePos, out float placeRotationZ, out _, out Collider2D attachmentTarget))
             return;
 
         GameObject placed = Instantiate(currentPrefabToPlace, placePos, Quaternion.Euler(0f, 0f, placeRotationZ));
         placed.SetActive(true);
-        ConfigurePlacedObject(placed);
+        ConfigurePlacedObject(placed, attachmentTarget);
         MarkPlacedObject(placed, CurrentBuildTool);
+        ConfigureToolSpecificComponents(placed, CurrentBuildTool);
     }
 
-    void ConfigurePlacedObject(GameObject placed)
+    void ConfigurePlacedObject(GameObject placed, Collider2D explicitAttachmentTarget = null)
     {
         StickyBlock sticky = placed.GetComponent<StickyBlock>();
         if (sticky != null)
@@ -262,6 +266,18 @@ public class SimpleBlockPlacer : MonoBehaviour
             flagGoal.attachmentLayer = attachmentLayer;
             flagGoal.TryAutoAttach();
         }
+
+        Firecracker firecracker = placed.GetComponent<Firecracker>();
+        if (firecracker != null)
+        {
+            firecracker.attachSearchRadius = attachSearchRadius;
+            firecracker.attachmentLayer = attachmentLayer;
+
+            if (explicitAttachmentTarget != null)
+                firecracker.AttachToTarget(explicitAttachmentTarget);
+            else
+                firecracker.TryAutoAttach();
+        }
     }
 
     public GameObject CreatePlacedObjectFromLevel(BuildTool tool, Vector3 position, float rotationZ)
@@ -282,6 +298,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         else
             ConfigurePlacedObject(placed);
         MarkPlacedObject(placed, tool);
+        ConfigureToolSpecificComponents(placed, tool);
         return placed;
     }
 
@@ -321,6 +338,14 @@ public class SimpleBlockPlacer : MonoBehaviour
         {
             flagGoal.attachSearchRadius = attachSearchRadius;
             flagGoal.attachmentLayer = attachmentLayer;
+        }
+
+        Firecracker firecracker = placed.GetComponent<Firecracker>();
+        if (firecracker != null)
+        {
+            firecracker.autoAttachOnStart = false;
+            firecracker.attachSearchRadius = attachSearchRadius;
+            firecracker.attachmentLayer = attachmentLayer;
         }
     }
 
@@ -484,6 +509,16 @@ public class SimpleBlockPlacer : MonoBehaviour
         marker.tool = tool;
     }
 
+    void ConfigureToolSpecificComponents(GameObject placed, BuildTool tool)
+    {
+        if (placed == null || tool != BuildTool.IronBlock)
+            return;
+
+        FallingCrushHazard crushHazard = placed.GetComponent<FallingCrushHazard>();
+        if (crushHazard == null)
+            placed.AddComponent<FallingCrushHazard>();
+    }
+
     public void SwitchToElementMode(ElementPaintTool tool)
     {
         CurrentElementTool = tool;
@@ -508,6 +543,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         CurrentMode = PlayerInputMode.Build;
         hasActiveBuildTool = true;
         CreatePreviewForTool(tool);
+        SetLevelPanelHiddenWhilePreviewing();
         RefreshToolbarButtons();
     }
 
@@ -542,10 +578,17 @@ public class SimpleBlockPlacer : MonoBehaviour
         }
 
         SwitchToBuildMode(tool);
-        SetBuildExpanded(false);
+        SetBuildExpanded(false, false);
     }
 
-    void ClearActiveSelection(bool refresh = true)
+    void SetLevelPanelHiddenWhilePreviewing()
+    {
+        LevelManager levelManager = LevelManager.Instance;
+        if (levelManager != null)
+            levelManager.SetLevelPanelVisible(false);
+    }
+
+    public void ClearActiveSelection(bool refresh = true)
     {
         hasActiveBuildTool = false;
         hasActiveElementTool = false;
@@ -615,6 +658,7 @@ public class SimpleBlockPlacer : MonoBehaviour
             case BuildTool.Spike: return spikePrefab;
             case BuildTool.Flag: return flagPrefab;
             case BuildTool.BalanceScale: return balanceScalePrefab != null ? balanceScalePrefab : GetRuntimeBalanceScalePrefab();
+            case BuildTool.Firecracker: return firecrackerPrefab;
             default: return null;
         }
     }
@@ -635,17 +679,19 @@ public class SimpleBlockPlacer : MonoBehaviour
         return worldPos;
     }
 
-    bool TryGetPlacementPosition(GameObject prefab, Vector3 desiredPosition, float rotationZ, out Vector3 finalPosition, out float finalRotationZ, out bool willAttach)
+    bool TryGetPlacementPosition(GameObject prefab, Vector3 desiredPosition, float rotationZ, out Vector3 finalPosition, out float finalRotationZ, out bool willAttach, out Collider2D attachmentTarget)
     {
         finalPosition = desiredPosition;
         finalRotationZ = rotationZ;
         willAttach = false;
+        attachmentTarget = null;
 
         GameObject attachmentSource = previewInstance != null ? previewInstance : prefab;
 
         if (TryHandleStickyPlacement(attachmentSource, prefab, desiredPosition, rotationZ, out finalPosition, out Collider2D stickyTarget, out bool stickyAttach))
         {
             willAttach = stickyAttach;
+            attachmentTarget = stickyTarget;
             return stickyAttach ? CanPlaceAt(prefab, finalPosition, rotationZ, stickyTarget) : CanPlaceAt(prefab, desiredPosition, rotationZ, null);
         }
 
@@ -659,6 +705,7 @@ public class SimpleBlockPlacer : MonoBehaviour
                 return false;
 
             willAttach = true;
+            attachmentTarget = spikeTarget;
             return CanPlaceAt(prefab, finalPosition, finalRotationZ, spikeTarget);
         }
 
@@ -672,10 +719,81 @@ public class SimpleBlockPlacer : MonoBehaviour
                 return false;
 
             willAttach = true;
+            attachmentTarget = flagTarget;
             return CanPlaceAt(prefab, finalPosition, finalRotationZ, flagTarget);
         }
 
+        Firecracker firecracker = attachmentSource.GetComponent<Firecracker>();
+        if (firecracker != null)
+        {
+            firecracker.attachSearchRadius = attachSearchRadius;
+            firecracker.attachmentLayer = attachmentLayer;
+
+            if (!TryGetValidFirecrackerPlacement(firecracker, prefab, desiredPosition, out finalPosition, out finalRotationZ, out Collider2D firecrackerTarget))
+                return false;
+
+            willAttach = true;
+            attachmentTarget = firecrackerTarget;
+            return true;
+        }
+
         return CanPlaceAt(prefab, desiredPosition, rotationZ, null);
+    }
+
+    bool TryGetValidFirecrackerPlacement(Firecracker firecracker, GameObject prefab, Vector3 desiredPosition, out Vector3 finalPosition, out float finalRotationZ, out Collider2D allowedAttachmentTarget)
+    {
+        finalPosition = desiredPosition;
+        finalRotationZ = 0f;
+        allowedAttachmentTarget = null;
+
+        Collider2D[] targets = Physics2D.OverlapPointAll(desiredPosition, attachmentLayer);
+        if (!TryChooseFirecrackerTarget(firecracker, targets, desiredPosition, out Collider2D foundCollider))
+        {
+            targets = Physics2D.OverlapCircleAll(desiredPosition, attachSearchRadius, attachmentLayer);
+            if (!TryChooseFirecrackerTarget(firecracker, targets, desiredPosition, out foundCollider))
+                return false;
+        }
+
+        if (!firecracker.TryGetCenterPose(foundCollider, out finalPosition, out finalRotationZ))
+            return false;
+
+        allowedAttachmentTarget = foundCollider;
+        return true;
+    }
+
+    bool TryChooseFirecrackerTarget(Firecracker firecracker, Collider2D[] targets, Vector3 desiredPosition, out Collider2D foundCollider)
+    {
+        foundCollider = null;
+        if (targets == null || targets.Length == 0)
+            return false;
+
+        GameObject foundObject = null;
+        float bestDistance = float.MaxValue;
+
+        for (int i = 0; i < targets.Length; i++)
+        {
+            Collider2D target = targets[i];
+            if (!firecracker.TryGetAttachRoot(target, out GameObject targetObject))
+                continue;
+
+            float distance = Vector2.Distance(desiredPosition, target.bounds.center);
+            if (foundObject != null && foundObject != targetObject)
+            {
+                if (targets.Length > 0 && !target.OverlapPoint(desiredPosition))
+                    continue;
+
+                return false;
+            }
+
+            if (foundObject == targetObject && distance >= bestDistance)
+                continue;
+
+            foundObject = targetObject;
+            foundCollider = target;
+            bestDistance = distance;
+        }
+
+        return foundCollider != null;
     }
 
     bool TryHandleStickyPlacement(GameObject attachmentSource, GameObject prefab, Vector3 desiredPosition, float rotationZ, out Vector3 finalPosition, out Collider2D target, out bool willAttach)
@@ -919,6 +1037,10 @@ public class SimpleBlockPlacer : MonoBehaviour
         TerrainTilemapSurface allowedTerrain = allowedAttachmentTarget != null
             ? allowedAttachmentTarget.GetComponentInParent<TerrainTilemapSurface>()
             : null;
+        LevelPlacedObject allowedPlacedObject = allowedAttachmentTarget != null
+            ? allowedAttachmentTarget.GetComponentInParent<LevelPlacedObject>()
+            : null;
+        bool placingFirecracker = prefab != null && prefab.GetComponent<Firecracker>() != null;
 
         Collider2D[] hits = Physics2D.OverlapBoxAll(position, checkSize, rotationZ, placementBlockLayer);
         for (int i = 0; i < hits.Length; i++)
@@ -927,6 +1049,10 @@ public class SimpleBlockPlacer : MonoBehaviour
             if (hit == null)
                 continue;
             if (allowedAttachmentTarget != null && hit == allowedAttachmentTarget)
+                continue;
+            if (allowedPlacedObject != null && hit.GetComponentInParent<LevelPlacedObject>() == allowedPlacedObject)
+                continue;
+            if (placingFirecracker && hit.GetComponentInParent<LevelPlacedObject>() != null)
                 continue;
             if (allowedTerrain != null && hit.GetComponentInParent<TerrainTilemapSurface>() == allowedTerrain)
                 continue;
@@ -960,6 +1086,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         DisableIfExists<HeatConductor>(preview);
         DisableIfExists<PhysicalWeight>(preview);
         DisableIfExists<BalanceScale>(preview);
+        DisableIfExists<Firecracker>(preview);
     }
 
     void DisableIfExists<T>(GameObject preview) where T : Behaviour
@@ -1002,6 +1129,7 @@ public class SimpleBlockPlacer : MonoBehaviour
 
         expandedBuildToolButtons.Clear();
         AddButtonIfFound(expandedBuildToolButtons, BalanceScaleButtonNames);
+        AddButtonIfFound(expandedBuildToolButtons, FirecrackerButtonNames);
 
         collapsibleUiObjects.Clear();
         AddUiObjectIfFound(toolbarBackground);
@@ -1037,6 +1165,7 @@ public class SimpleBlockPlacer : MonoBehaviour
         BindButton(FindButtonByName("BtnSpike", "尖刺"), () => ToggleBuildTool(BuildTool.Spike));
         BindButton(FindButtonByName("BtnFlag", "旗帜", "Flag", "flag", "终点旗"), () => ToggleBuildTool(BuildTool.Flag));
         BindButton(FindButtonByName(BalanceScaleButtonNames), () => ToggleBuildTool(BuildTool.BalanceScale));
+        BindButton(FindButtonByName(FirecrackerButtonNames), () => ToggleBuildTool(BuildTool.Firecracker));
 
         SetToolbarExpanded(toolbarExpanded);
         SetBuildExpanded(false, false);

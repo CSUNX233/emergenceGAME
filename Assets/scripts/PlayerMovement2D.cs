@@ -33,6 +33,19 @@ public class PlayerMovement2D : MonoBehaviour
     public float apexAccelerationMultiplier = 1.12f;
     public float apexSpeedBonus = 0.35f;
 
+    [Header("Wall Jump")]
+    public bool enableWallSlideAndJump = true;
+    public Vector2 wallCheckBox = new Vector2(0.08f, 0.9f);
+    public float wallCheckExtraOffset = 0.03f;
+    public bool wallSlideRequiresInput = true;
+    public float wallSlideMaxFallSpeed = 7.2f;
+    public float wallNoInputMaxFallSpeed = 15f;
+    public float wallSlideBrakeAcceleration = 38f;
+    public float wallCoyoteTime = 0.12f;
+    public Vector2 wallJumpVelocity = new Vector2(4.4f, 10.8f);
+    public float wallJumpHorizontalLockTime = 0.11f;
+    public float wallJumpLockedAccelerationMultiplier = 0.55f;
+
     [Header("Ground Check")]
     public LayerMask groundLayer = ~0;
     public Vector2 groundCheckBox = new Vector2(0.6f, 0.08f);
@@ -50,16 +63,24 @@ public class PlayerMovement2D : MonoBehaviour
     private Collider2D cachedCollider;
     private readonly RaycastHit2D[] pushHits = new RaycastHit2D[8];
     private readonly Collider2D[] groundHits = new Collider2D[12];
+    private readonly Collider2D[] wallHits = new Collider2D[12];
     private float moveInput;
     private bool isGrounded;
     private bool wasGrounded;
+    private bool isTouchingWall;
+    private bool isWallSliding;
+    private int wallDirection;
+    private int wallCoyoteDirection;
     private bool jumpHeld;
     private bool jumpPressedThisFrame;
     private bool jumpReleasedThisFrame;
     private bool isJumping;
     private float coyoteCounter;
+    private float wallCoyoteCounter;
     private float jumpBufferCounter;
     private float jumpHoldCounter;
+    private float wallJumpLockCounter;
+    private float wallJumpDirection;
     private float baseGravityScale;
     private int speedParameterHash;
     private int jumpParameterHash;
@@ -83,6 +104,7 @@ public class PlayerMovement2D : MonoBehaviour
     {
         UpdateGroundedState();
         moveInput = Input.GetAxisRaw("Horizontal");
+        UpdateWallState();
         ReadJumpInput();
         UpdateJumpTimers();
         TryConsumeBufferedJump();
@@ -94,6 +116,7 @@ public class PlayerMovement2D : MonoBehaviour
     void FixedUpdate()
     {
         UpdateGroundedState();
+        UpdateWallState();
         ApplyHorizontalMovement();
     }
 
@@ -102,13 +125,25 @@ public class PlayerMovement2D : MonoBehaviour
         float pushMultiplier = GetPushSpeedMultiplier();
         float speedLimit = maxRunSpeed;
         float currentSpeed = cachedRigidbody.velocity.x;
+        float inputForMovement = moveInput;
 
         bool hasInput = Mathf.Abs(moveInput) > 0.01f;
         bool reversing = hasInput && Mathf.Sign(moveInput) != Mathf.Sign(currentSpeed) && Mathf.Abs(currentSpeed) > 0.05f;
 
+        if (wallJumpLockCounter > 0f)
+        {
+            inputForMovement = wallJumpDirection;
+            hasInput = true;
+            reversing = false;
+            wallJumpLockCounter = Mathf.Max(0f, wallJumpLockCounter - Time.fixedDeltaTime);
+        }
+
         float acceleration = isGrounded
             ? (hasInput ? groundAcceleration : groundDeceleration)
             : (hasInput ? airAcceleration : airDeceleration);
+
+        if (!isGrounded && wallJumpLockCounter > 0f)
+            acceleration *= wallJumpLockedAccelerationMultiplier;
 
         if (!isGrounded)
         {
@@ -123,7 +158,7 @@ public class PlayerMovement2D : MonoBehaviour
         if (reversing)
             acceleration *= turnAccelerationMultiplier;
 
-        float targetSpeed = moveInput * speedLimit * pushMultiplier;
+        float targetSpeed = inputForMovement * speedLimit * pushMultiplier;
         float nextSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, acceleration * Time.fixedDeltaTime);
         cachedRigidbody.velocity = new Vector2(nextSpeed, cachedRigidbody.velocity.y);
     }
@@ -205,6 +240,67 @@ public class PlayerMovement2D : MonoBehaviour
             isJumping = false;
     }
 
+    void UpdateWallState()
+    {
+        isTouchingWall = false;
+        isWallSliding = false;
+        wallDirection = 0;
+
+        if (!enableWallSlideAndJump || cachedCollider == null)
+            return;
+
+        bool touchingLeft = IsTouchingWallSide(-1);
+        bool touchingRight = IsTouchingWallSide(1);
+
+        if (touchingLeft && touchingRight)
+            wallDirection = Mathf.Abs(moveInput) > 0.01f ? (moveInput > 0f ? 1 : -1) : 0;
+        else if (touchingRight)
+            wallDirection = 1;
+        else if (touchingLeft)
+            wallDirection = -1;
+
+        isTouchingWall = wallDirection != 0;
+        if (!isTouchingWall || isGrounded || cachedRigidbody.velocity.y > 0.1f)
+            return;
+
+        bool pressingTowardWall = Mathf.Abs(moveInput) > 0.01f && Mathf.Sign(moveInput) == wallDirection;
+        if (pressingTowardWall || !wallSlideRequiresInput)
+            isWallSliding = true;
+    }
+
+    bool IsTouchingWallSide(int side)
+    {
+        Bounds bounds = cachedCollider.bounds;
+        Vector2 checkCenter = new Vector2(
+            bounds.center.x + side * (bounds.extents.x + wallCheckBox.x * 0.5f + wallCheckExtraOffset),
+            bounds.center.y
+        );
+
+        ContactFilter2D filter = new ContactFilter2D();
+        filter.useTriggers = false;
+        filter.SetLayerMask(groundLayer);
+
+        int hitCount = Physics2D.OverlapBox(checkCenter, wallCheckBox, 0f, filter, wallHits);
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider2D hit = wallHits[i];
+            if (hit == null || hit == cachedCollider)
+                continue;
+
+            if (side > 0 && hit.bounds.min.x < bounds.max.x - 0.08f)
+                continue;
+
+            if (side < 0 && hit.bounds.max.x > bounds.min.x + 0.08f)
+                continue;
+
+            float verticalOverlap = Mathf.Min(bounds.max.y, hit.bounds.max.y) - Mathf.Max(bounds.min.y, hit.bounds.min.y);
+            if (verticalOverlap > 0.18f)
+                return true;
+        }
+
+        return false;
+    }
+
     bool IsTouchingGround(Vector2 checkCenter)
     {
         ContactFilter2D filter = new ContactFilter2D();
@@ -248,6 +344,16 @@ public class PlayerMovement2D : MonoBehaviour
     {
         coyoteCounter = isGrounded ? coyoteTime : Mathf.Max(0f, coyoteCounter - Time.deltaTime);
 
+        if (isWallSliding || (isTouchingWall && !isGrounded))
+        {
+            wallCoyoteCounter = wallCoyoteTime;
+            wallCoyoteDirection = wallDirection;
+        }
+        else
+        {
+            wallCoyoteCounter = Mathf.Max(0f, wallCoyoteCounter - Time.deltaTime);
+        }
+
         if (jumpBufferCounter > 0f)
             jumpBufferCounter = Mathf.Max(0f, jumpBufferCounter - Time.deltaTime);
 
@@ -262,10 +368,14 @@ public class PlayerMovement2D : MonoBehaviour
         if (jumpBufferCounter <= 0f)
             return;
 
-        if (coyoteCounter <= 0f)
+        if (coyoteCounter > 0f)
+        {
+            PerformJump();
             return;
+        }
 
-        PerformJump();
+        if (enableWallSlideAndJump && wallCoyoteCounter > 0f && wallCoyoteDirection != 0)
+            PerformWallJump(wallCoyoteDirection);
     }
 
     void PerformJump()
@@ -280,6 +390,27 @@ public class PlayerMovement2D : MonoBehaviour
         isGrounded = false;
         isJumping = true;
         coyoteCounter = 0f;
+        jumpBufferCounter = 0f;
+        jumpHoldCounter = maxJumpHoldTime;
+    }
+
+    void PerformWallJump(int jumpWallDirection)
+    {
+        float awayDirection = -Mathf.Sign(jumpWallDirection);
+        bool pressingAwayFromWall = Mathf.Abs(moveInput) > 0.01f && Mathf.Sign(moveInput) == awayDirection;
+        float horizontalVelocity = pressingAwayFromWall
+            ? awayDirection * wallJumpVelocity.x
+            : cachedRigidbody.velocity.x;
+
+        cachedRigidbody.velocity = new Vector2(horizontalVelocity, wallJumpVelocity.y);
+
+        isGrounded = false;
+        isWallSliding = false;
+        isJumping = true;
+        wallJumpDirection = pressingAwayFromWall ? awayDirection : 0f;
+        wallJumpLockCounter = pressingAwayFromWall ? wallJumpHorizontalLockTime : 0f;
+        coyoteCounter = 0f;
+        wallCoyoteCounter = 0f;
         jumpBufferCounter = 0f;
         jumpHoldCounter = maxJumpHoldTime;
     }
@@ -301,6 +432,17 @@ public class PlayerMovement2D : MonoBehaviour
         }
 
         cachedRigidbody.gravityScale = baseGravityScale * gravityMultiplier;
+
+        if (isTouchingWall && !isGrounded && cachedRigidbody.velocity.y < 0f)
+        {
+            float targetWallFallSpeed = isWallSliding ? wallSlideMaxFallSpeed : wallNoInputMaxFallSpeed;
+            float y = Mathf.MoveTowards(
+                cachedRigidbody.velocity.y,
+                -targetWallFallSpeed,
+                wallSlideBrakeAcceleration * Time.deltaTime
+            );
+            cachedRigidbody.velocity = new Vector2(cachedRigidbody.velocity.x, y);
+        }
 
         if (cachedRigidbody.velocity.y < -maxFallSpeed)
             cachedRigidbody.velocity = new Vector2(cachedRigidbody.velocity.x, -maxFallSpeed);
@@ -348,5 +490,23 @@ public class PlayerMovement2D : MonoBehaviour
             center = transform.position;
         }
         Gizmos.DrawWireCube(center, groundCheckBox);
+
+        if (drawCollider != null)
+        {
+            Bounds bounds = drawCollider.bounds;
+            Gizmos.color = Color.cyan;
+            Vector3 leftCenter = new Vector3(
+                bounds.center.x - (bounds.extents.x + wallCheckBox.x * 0.5f + wallCheckExtraOffset),
+                bounds.center.y,
+                transform.position.z
+            );
+            Vector3 rightCenter = new Vector3(
+                bounds.center.x + bounds.extents.x + wallCheckBox.x * 0.5f + wallCheckExtraOffset,
+                bounds.center.y,
+                transform.position.z
+            );
+            Gizmos.DrawWireCube(leftCenter, wallCheckBox);
+            Gizmos.DrawWireCube(rightCenter, wallCheckBox);
+        }
     }
 }

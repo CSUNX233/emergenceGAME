@@ -16,6 +16,7 @@ GameObject:
   - component: {fileID: 7200000000000000007}
   - component: {fileID: 7200000000000000008}
   - component: {fileID: 7200000000000000009}
+  - component: {fileID: 7200000000000000010}
   m_Layer: 6
   m_Name: IronBlock
   m_TagString: Untagged
@@ -126,7 +127,7 @@ BoxCollider2D:
   m_SpriteTilingProperty:
     border: {x: 0, y: 0, z: 0, w: 0}
     pivot: {x: 0.5, y: 0.5}
-    oldSize: {x: 0.9076923, y: 0.9076923}
+    oldSize: {x: 0.944, y: 0.944}
     newSize: {x: 10.24, y: 10.24}
     adaptiveTilingThreshold: 0.5
     drawMode: 0
@@ -150,7 +151,7 @@ Rigidbody2D:
   m_Mass: 2.8
   m_LinearDrag: 0.15
   m_AngularDrag: 0.05
-  m_GravityScale: 1
+  m_GravityScale: 6
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -231,3 +232,19 @@ MonoBehaviour:
   baseWeight: 2.8
   extraWeight: 0
   syncRigidbodyMass: 1
+--- !u!114 &7200000000000000010
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7200000000000000001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 01c7b258c8114b37b8ce58f2edc01e4a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  minimumDownwardSpeed: 1.5
+  damage: 999
+  requireHitFromAbove: 1
+  topHitTolerance: 0.08
