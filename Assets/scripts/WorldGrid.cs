@@ -770,4 +770,18 @@ public class WorldGrid : MonoBehaviour
     {
         return InBounds(x, y) && grid[x, y] == MaterialType.Water;
     }
+
+    public bool IsFireCell(int x, int y)
+    {
+        return InBounds(x, y) && grid[x, y] == MaterialType.Fire;
+    }
+
+    public bool TryTurnFireToSteam(int x, int y)
+    {
+        if (!IsFireCell(x, y))
+            return false;
+
+        grid[x, y] = MaterialType.Steam;
+        return true;
+    }
 }

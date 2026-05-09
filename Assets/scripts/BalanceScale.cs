@@ -23,6 +23,7 @@ public class BalanceScale : MonoBehaviour
     public float waterWeightMultiplier = 0.9f;
     public float waterUnitsPerGridCell = 0.12f;
     public float objectDisplacementMultiplier = 0.55f;
+    public float fireEvaporationRate = 1.4f;
     public Color waterColor = new Color(0.22f, 0.58f, 1f, 0.64f);
 
     private Transform beamRoot;
@@ -178,6 +179,7 @@ public class BalanceScale : MonoBehaviour
             return;
 
         CaptureWaterCells(side, ref waterAmount);
+        EvaporateWaterTouchingFire(side, ref waterAmount);
 
         float availableCapacity = Mathf.Max(0f, waterCapacityPerBasket - GetObjectDisplacement(side));
         if (waterAmount > availableCapacity)
@@ -207,6 +209,41 @@ public class BalanceScale : MonoBehaviour
                     waterAmount += waterUnitsPerGridCell;
             }
         }
+    }
+
+    void EvaporateWaterTouchingFire(int side, ref float waterAmount)
+    {
+        if (waterAmount <= 0f)
+            return;
+
+        float localCenterX = side * GetBasketCenterX();
+        float fill01 = waterCapacityPerBasket > 0.001f ? Mathf.Clamp01(waterAmount / waterCapacityPerBasket) : 0f;
+        Vector2 interiorSize = GetBasketInteriorSize();
+        Vector2 localSize = new Vector2(interiorSize.x, Mathf.Max(worldGrid.CellHeight, interiorSize.y * Mathf.Max(0.15f, fill01)));
+        Vector2 localCenter = new Vector2(localCenterX, -basketDrop + localSize.y * 0.5f + 0.06f);
+        GetBasketGridBounds(localCenter, localSize, out int minX, out int maxX, out int minY, out int maxY);
+
+        int fireContacts = 0;
+        for (int x = minX; x <= maxX; x++)
+        {
+            for (int y = minY; y <= maxY; y++)
+            {
+                if (worldGrid.TryTurnFireToSteam(x, y))
+                {
+                    fireContacts++;
+                    continue;
+                }
+
+                if (worldGrid.HasFireNearby(x, y))
+                    fireContacts++;
+            }
+        }
+
+        if (fireContacts <= 0)
+            return;
+
+        float evaporated = Mathf.Max(waterUnitsPerGridCell, fireEvaporationRate * fireContacts * Time.fixedDeltaTime);
+        waterAmount = Mathf.Max(0f, waterAmount - evaporated);
     }
 
     void GetBasketGridBounds(Vector2 localCenter, Vector2 localSize, out int minX, out int maxX, out int minY, out int maxY)
