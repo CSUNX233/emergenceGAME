@@ -106,14 +106,14 @@ public class BalanceScale : MonoBehaviour
 
     void BuildStand()
     {
-        CreateVisualBox("Base", transform, new Vector2(0f, -0.95f), new Vector2(1.25f, 0.12f), new Color(0.42f, 0.37f, 0.31f), false);
+        CreateVisualBox("Base", transform, new Vector2(0f, -0.95f), new Vector2(1.25f, 0.12f), new Color(0.42f, 0.37f, 0.31f), true);
         CreateVisualBox("Post", transform, new Vector2(0f, -0.42f), new Vector2(0.12f, 1.0f), new Color(0.46f, 0.40f, 0.34f), false);
         CreateVisualBox("Pivot", transform, new Vector2(0f, 0.12f), new Vector2(0.34f, 0.18f), new Color(0.72f, 0.64f, 0.43f), false);
     }
 
     void BuildBeamAndBaskets()
     {
-        CreateVisualBox("Beam", beamRoot, new Vector2(0f, 0f), new Vector2(beamWidth, 0.09f), new Color(0.60f, 0.48f, 0.34f), true);
+        CreateVisualBox("Beam", beamRoot, new Vector2(0f, 0f), new Vector2(beamWidth, 0.09f), new Color(0.60f, 0.48f, 0.34f), false);
 
         float basketCenterX = GetBasketCenterX();
         BuildBasket("LeftBasket", -basketCenterX);
