@@ -360,8 +360,7 @@ public class LevelManager : MonoBehaviour
         if (terrainRegistry != null)
         {
             string registryTerrainId = terrainRegistry.GetDefaultTerrainIdForLevel(levelNumber);
-            if (!string.IsNullOrEmpty(registryTerrainId))
-                return registryTerrainId;
+            return registryTerrainId;
         }
 
         if (levelNumber == 2)

@@ -6,7 +6,11 @@ using UnityEngine;
 public class LevelTerrainRegistry : MonoBehaviour
 {
     public bool disableUnselectedTerrains = true;
+    public bool hideUnboundChildTerrains = true;
+    public Transform terrainContainer;
     public List<LevelTerrainBinding> bindings = new List<LevelTerrainBinding>();
+
+    private GameObject runtimeTerrainInstance;
 
     public string GetDefaultTerrainIdForLevel(int levelNumber)
     {
@@ -17,21 +21,119 @@ public class LevelTerrainRegistry : MonoBehaviour
     public void ApplyLevelTerrain(int levelNumber, string terrainPrefabId)
     {
         LevelTerrainBinding selected = FindBinding(levelNumber, terrainPrefabId);
+        Transform container = GetTerrainContainer();
 
         if (disableUnselectedTerrains)
         {
+            if (hideUnboundChildTerrains)
+                HideContainerTerrains(container);
+
             for (int i = 0; i < bindings.Count; i++)
             {
                 LevelTerrainBinding binding = bindings[i];
                 if (binding == null || binding.terrainRoot == null)
                     continue;
 
-                binding.terrainRoot.SetActive(binding == selected);
+                if (IsSceneObject(binding.terrainRoot))
+                    binding.terrainRoot.SetActive(binding == selected);
             }
         }
-        else if (selected != null && selected.terrainRoot != null)
+
+        ClearRuntimeTerrainInstance();
+
+        if (selected == null || selected.terrainRoot == null)
+            return;
+
+        if (IsSceneObject(selected.terrainRoot))
         {
             selected.terrainRoot.SetActive(true);
+            StripGeneratedSolidColliders(selected.terrainRoot);
+        }
+        else
+        {
+            runtimeTerrainInstance = Instantiate(selected.terrainRoot, container);
+            runtimeTerrainInstance.name = selected.TerrainId;
+            runtimeTerrainInstance.transform.localPosition = Vector3.zero;
+            runtimeTerrainInstance.transform.localRotation = Quaternion.identity;
+            runtimeTerrainInstance.transform.localScale = Vector3.one;
+            runtimeTerrainInstance.SetActive(true);
+            StripGeneratedSolidColliders(runtimeTerrainInstance);
+        }
+    }
+
+    Transform GetTerrainContainer()
+    {
+        if (terrainContainer != null)
+            return terrainContainer;
+
+        return transform;
+    }
+
+    void HideContainerTerrains(Transform container)
+    {
+        if (container == null)
+            return;
+
+        for (int i = 0; i < container.childCount; i++)
+        {
+            Transform child = container.GetChild(i);
+            if (child == null || child.gameObject == runtimeTerrainInstance)
+                continue;
+
+            if (IsBoundSceneTerrain(child.gameObject))
+                continue;
+
+            if (child.GetComponentInChildren<UnityEngine.Tilemaps.Tilemap>(true) != null)
+                child.gameObject.SetActive(false);
+        }
+    }
+
+    bool IsBoundSceneTerrain(GameObject candidate)
+    {
+        for (int i = 0; i < bindings.Count; i++)
+        {
+            LevelTerrainBinding binding = bindings[i];
+            if (binding != null && binding.terrainRoot == candidate && IsSceneObject(candidate))
+                return true;
+        }
+
+        return false;
+    }
+
+    void ClearRuntimeTerrainInstance()
+    {
+        if (runtimeTerrainInstance == null)
+            return;
+
+        if (Application.isPlaying)
+            Destroy(runtimeTerrainInstance);
+        else
+            DestroyImmediate(runtimeTerrainInstance);
+
+        runtimeTerrainInstance = null;
+    }
+
+    bool IsSceneObject(GameObject obj)
+    {
+        return obj != null && obj.scene.IsValid();
+    }
+
+    void StripGeneratedSolidColliders(GameObject root)
+    {
+        if (root == null)
+            return;
+
+        Transform[] children = root.GetComponentsInChildren<Transform>(true);
+        for (int i = children.Length - 1; i >= 0; i--)
+        {
+            Transform child = children[i];
+            if (child == null || child == root.transform || child.name != "Generated Solid Colliders")
+                continue;
+
+            if (Application.isPlaying)
+                Destroy(child.gameObject);
+            else
+                DestroyImmediate(child.gameObject);
         }
     }
 
