@@ -107,18 +107,21 @@ public class TerrainTilemapSystem : MonoBehaviour
             tilemapObject.AddComponent<TilemapRenderer>();
         }
 
-        ConfigureTerrainTilemap(terrainTilemap, 1);
+        ConfigureTerrainTilemap(terrainTilemap, 1, true);
     }
 
-    void ConfigureTerrainTilemap(Tilemap tilemap, int sortingOrder)
+    void ConfigureTerrainTilemap(Tilemap tilemap, int sortingOrder, bool normalizeTransform)
     {
         if (tilemap == null)
             return;
 
         GameObject terrainObject = tilemap.gameObject;
-        terrainObject.transform.localPosition = Vector3.zero;
-        terrainObject.transform.localRotation = Quaternion.identity;
-        terrainObject.transform.localScale = Vector3.one;
+        if (normalizeTransform)
+        {
+            terrainObject.transform.localPosition = Vector3.zero;
+            terrainObject.transform.localRotation = Quaternion.identity;
+            terrainObject.transform.localScale = Vector3.one;
+        }
 
         int layer = LayerMask.NameToLayer(terrainLayerName);
         terrainObject.layer = layer >= 0 ? layer : 6;
@@ -163,7 +166,7 @@ public class TerrainTilemapSystem : MonoBehaviour
             if (tilemap == null)
                 continue;
 
-            ConfigureTerrainTilemap(tilemap, i + 1);
+            ConfigureTerrainTilemap(tilemap, i + 1, tilemap == terrainTilemap);
             RebuildSolidColliders(tilemap);
         }
     }
